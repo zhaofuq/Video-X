@@ -187,7 +187,8 @@ class Wan_Controller(Fun_Controller):
         generator = torch.Generator(device=self.device).manual_seed(int(seed_textbox))
         
         if self.enable_riflex:
-            self.pipeline.transformer.enable_riflex(k = self.riflex_k, L_test = length_slider if not is_image else 1)
+            latent_frames = (int(length_slider) - 1) // self.vae.config.temporal_compression_ratio + 1
+            self.pipeline.transformer.enable_riflex(k = self.riflex_k, L_test = latent_frames if not is_image else 1)
 
         try:
             if self.model_type == "Inpaint":
@@ -275,13 +276,14 @@ class Wan_Controller(Fun_Controller):
 Wan_Controller_Host = Wan_Controller
 Wan_Controller_Client = Fun_Controller_Client
 
-def ui(GPU_memory_mode, scheduler_dict, config_path, ulysses_degree, ring_degree, enable_teacache, teacache_threshold, num_skip_start_steps, teacache_offload, enable_riflex, riflex_k, weight_dtype):
+def ui(GPU_memory_mode, scheduler_dict, config_path, ulysses_degree, ring_degree, enable_teacache, teacache_threshold, num_skip_start_steps, teacache_offload, enable_riflex, riflex_k, weight_dtype, savedir_sample=None):
     controller = Wan_Controller(
         GPU_memory_mode, scheduler_dict, model_name=None, model_type="Inpaint", 
         config_path=config_path, ulysses_degree=ulysses_degree, ring_degree=ring_degree,
         enable_teacache=enable_teacache, teacache_threshold=teacache_threshold, 
         num_skip_start_steps=num_skip_start_steps, teacache_offload=teacache_offload, 
         enable_riflex=enable_riflex, riflex_k=riflex_k, weight_dtype=weight_dtype, 
+        savedir_sample=savedir_sample,
     )
 
     with gr.Blocks(css=css) as demo:
@@ -397,13 +399,14 @@ def ui(GPU_memory_mode, scheduler_dict, config_path, ulysses_degree, ring_degree
             )
     return demo, controller
 
-def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path, ulysses_degree, ring_degree, enable_teacache, teacache_threshold, num_skip_start_steps, teacache_offload, enable_riflex, riflex_k, weight_dtype):
+def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path, ulysses_degree, ring_degree, enable_teacache, teacache_threshold, num_skip_start_steps, teacache_offload, enable_riflex, riflex_k, weight_dtype, savedir_sample=None):
     controller = Wan_Controller_Host(
         GPU_memory_mode, scheduler_dict, model_name=model_name, model_type=model_type, 
         config_path=config_path, ulysses_degree=ulysses_degree, ring_degree=ring_degree,
         enable_teacache=enable_teacache, teacache_threshold=teacache_threshold, 
         num_skip_start_steps=num_skip_start_steps, teacache_offload=teacache_offload, 
         enable_riflex=enable_riflex, riflex_k=riflex_k, weight_dtype=weight_dtype, 
+        savedir_sample=savedir_sample,
     )
 
     with gr.Blocks(css=css) as demo:
@@ -509,8 +512,8 @@ def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path
             )
     return demo, controller
 
-def ui_client(scheduler_dict, model_name):
-    controller = Wan_Controller_Client(scheduler_dict)
+def ui_client(scheduler_dict, model_name, savedir_sample=None):
+    controller = Wan_Controller_Client(scheduler_dict, savedir_sample)
 
     with gr.Blocks(css=css) as demo:
         gr.Markdown(
