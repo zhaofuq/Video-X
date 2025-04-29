@@ -36,7 +36,7 @@ from .ui import (create_cfg_and_seedbox,
 
 class CogVideoXFunController(Fun_Controller):
     def update_diffusion_transformer(self, diffusion_transformer_dropdown):
-        print("Update diffusion transformer")
+        print(f"Update diffusion transformer: {diffusion_transformer_dropdown}")
         self.diffusion_transformer_dropdown = diffusion_transformer_dropdown
         if diffusion_transformer_dropdown == "none":
             return gr.update()
@@ -97,6 +97,9 @@ class CogVideoXFunController(Fun_Controller):
             self.pipeline.enable_model_cpu_offload(device=self.device)
         elif self.GPU_memory_mode == "model_cpu_offload":
             self.pipeline.enable_model_cpu_offload(device=self.device)
+        elif self.GPU_memory_mode == "model_full_load_and_qfloat8":
+            convert_weight_dtype_wrapper(self.pipeline.transformer, self.weight_dtype)
+            self.pipeline.enable_model_cpu_offload(device=self.device)
         else:
             self.pipeline.to(self.device)
         print("Update diffusion transformer done")
@@ -128,13 +131,23 @@ class CogVideoXFunController(Fun_Controller):
         control_video,
         denoise_strength,
         seed_textbox,
+        ref_image = None,
+        enable_teacache = None, 
+        teacache_threshold = None, 
+        num_skip_start_steps = None, 
+        teacache_offload = None, 
+        cfg_skip_ratio = None,
+        enable_riflex = None, 
+        riflex_k = None, 
         is_api = False,
     ):
         self.clear_cache()
 
-        self.input_check(
+        _, comment = self.input_check(
             resize_method, generation_method, start_image, end_image, validation_video,control_video, is_api
         )
+        if comment != "OK":
+            return "", comment
         is_image = True if generation_method == "Image Generation" else False
 
         if self.base_model_path != base_model_dropdown:
@@ -270,6 +283,7 @@ class CogVideoXFunController(Fun_Controller):
                 ).videos
         except Exception as e:
             self.clear_cache()
+            print(f"Error. error information is {str(e)}")
             if self.lora_model_path != "none":
                 self.pipeline = unmerge_lora(self.pipeline, self.lora_model_path, multiplier=lora_alpha_slider)
             if is_api:
@@ -456,7 +470,7 @@ def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, ulysses_deg
             """
         )
         with gr.Column(variant="panel"):
-            model_type = create_fake_model_type(visible=True)
+            model_type = create_fake_model_type(visible=False)
             diffusion_transformer_dropdown = create_fake_model_checkpoints(model_name, visible=True)
             base_model_dropdown, lora_model_dropdown, lora_alpha_slider = create_fake_finetune_models_checkpoints(visible=True)
         
