@@ -48,8 +48,9 @@ ulysses_degree      = 1
 ring_degree         = 1
 # Use FSDP to save more GPU memory in multi gpus.
 fsdp_dit            = False
+fsdp_text_encoder   = True
 # Compile will give a speedup in fixed resolution and need a little GPU memory. 
-# The compile_dit is not compatible with the fsdp_dit.
+# The compile_dit is not compatible with the fsdp_dit and sequential_cpu_offload.
 compile_dit         = False
 
 # Support TeaCache.
@@ -205,19 +206,29 @@ if ulysses_degree > 1 or ring_degree > 1:
     if fsdp_dit:
         shard_fn = partial(shard_model, device_id=device, param_dtype=weight_dtype)
         pipeline.transformer = shard_fn(pipeline.transformer)
+        print("Add FSDP DIT")
+    if fsdp_text_encoder:
+        shard_fn = partial(shard_model, device_id=device, param_dtype=weight_dtype)
+        pipeline.text_encoder = shard_fn(pipeline.text_encoder)
+        print("Add FSDP TEXT ENCODER")
+
+if compile_dit:
+    for i in range(len(pipeline.transformer.blocks)):
+        pipeline.transformer.blocks[i] = torch.compile(pipeline.transformer.blocks[i])
+    print("Add Compile")
 
 if GPU_memory_mode == "sequential_cpu_offload":
     replace_parameters_by_name(transformer, ["modulation",], device=device)
     transformer.freqs = transformer.freqs.to(device=device)
     pipeline.enable_sequential_cpu_offload(device=device)
 elif GPU_memory_mode == "model_cpu_offload_and_qfloat8":
-    convert_model_weight_to_float8(transformer, exclude_module_name=["modulation",])
+    convert_model_weight_to_float8(transformer, exclude_module_name=["modulation",], device=device)
     convert_weight_dtype_wrapper(transformer, weight_dtype)
     pipeline.enable_model_cpu_offload(device=device)
 elif GPU_memory_mode == "model_cpu_offload":
     pipeline.enable_model_cpu_offload(device=device)
 elif GPU_memory_mode == "model_full_load_and_qfloat8":
-    convert_model_weight_to_float8(transformer, exclude_module_name=["modulation",])
+    convert_model_weight_to_float8(transformer, exclude_module_name=["modulation",], device=device)
     convert_weight_dtype_wrapper(transformer, weight_dtype)
     pipeline.to(device=device)
 else:
@@ -229,6 +240,10 @@ if coefficients is not None:
     pipeline.transformer.enable_teacache(
         coefficients, num_inference_steps, teacache_threshold, num_skip_start_steps=num_skip_start_steps, offload=teacache_offload
     )
+
+if cfg_skip_ratio is not None:
+    print(f"Enable cfg_skip_ratio {cfg_skip_ratio}.")
+    pipeline.transformer.enable_cfg_skip(cfg_skip_ratio, num_inference_steps)
 
 generator = torch.Generator(device=device).manual_seed(seed)
 
@@ -257,7 +272,6 @@ with torch.no_grad():
 
             video        = input_video,
             mask_video   = input_video_mask,
-            cfg_skip_ratio = cfg_skip_ratio,
             shift = shift,
         ).videos
     else:
@@ -270,7 +284,6 @@ with torch.no_grad():
             generator   = generator,
             guidance_scale = guidance_scale,
             num_inference_steps = num_inference_steps,
-            cfg_skip_ratio = cfg_skip_ratio,
             shift = shift,
         ).videos
 

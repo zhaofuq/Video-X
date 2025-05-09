@@ -20,7 +20,29 @@ from videox_fun.ui.cogvideox_fun_ui import CogVideoXFunController
 def main():
     parser = argparse.ArgumentParser(description='xDiT HTTP Service')
     parser.add_argument('--world_size', type=int, default=8, help='Number of parallel workers')
-    parser.add_argument('--gpu_memory_mode', type=str, default="model_full_load", help='GPU memory mode')
+    parser.add_argument(
+        '--gpu_memory_mode', type=str, default="model_cpu_offload", help='''
+GPU memory mode, which can be choosen in [model_full_load, model_full_load_and_qfloat8, model_cpu_offload, model_cpu_offload_and_qfloat8].
+model_full_load means that the entire model will be moved to the GPU.
+
+model_full_load_and_qfloat8 means that the entire model will be moved to the GPU,
+and the transformer model has been quantized to float8, which can save more GPU memory. 
+
+model_cpu_offload means that the entire model will be moved to the CPU after use, which can save some GPU memory.
+
+model_cpu_offload_and_qfloat8 indicates that the entire model will be moved to the CPU after use, 
+and the transformer model has been quantized to float8, which can save more GPU memory. 
+        '''
+    )
+    parser.add_argument(
+        '--compile_dit', action='store_true', help='''
+Enable compile dit. 
+Compile will give a speedup in fixed resolution and need a little GPU memory. 
+The compile_dit is not compatible with the fsdp_dit and sequential_cpu_offload.
+        '''
+    )
+    parser.add_argument('--fsdp_dit', action='store_true', help="Use DIT FSDP to save more GPU memory in multi gpus.")
+    parser.add_argument('--fsdp_text_encoder', action='store_true', help="Use Text Encoder FSDP to save more GPU memory in multi gpus.")
     parser.add_argument('--ulysses_degree', type=int, default=4, help='Degree of Ulysses configuration')
     parser.add_argument('--ring_degree', type=int, default=2, help='Degree of Ring configuration')
     parser.add_argument('--weight_dtype', type=str, default='bf16', help='Weight data type')
@@ -40,8 +62,9 @@ def main():
     engine = MultiNodesEngine(
         world_size=args.world_size, Controller=CogVideoXFunController,
         GPU_memory_mode=args.gpu_memory_mode, scheduler_dict=flow_scheduler_dict, model_name=args.model_name, model_type=args.model_type, config_path=None, 
-        ulysses_degree=args.ulysses_degree, ring_degree=args.ring_degree, enable_teacache=False, teacache_threshold=0.1, num_skip_start_steps=5, 
-        teacache_offload=False, weight_dtype=weight_dtype, savedir_sample=args.savedir_sample,
+        ulysses_degree=args.ulysses_degree, ring_degree=args.ring_degree, 
+        fsdp_dit=args.fsdp_dit, fsdp_text_encoder=args.fsdp_text_encoder, compile_dit=args.compile_dit, 
+        weight_dtype=weight_dtype, savedir_sample=args.savedir_sample,
     )
     
     def gr_launch():

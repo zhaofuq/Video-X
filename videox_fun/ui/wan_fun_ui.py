@@ -37,6 +37,7 @@ from .ui import (create_cfg_and_seedbox, create_cfg_riflex_k,
                  create_height_width, create_model_checkpoints,
                  create_model_type, create_prompts, create_samplers,
                  create_teacache_params, create_ui_outputs)
+from ..dist import set_multi_gpus_devices, shard_model
 
 
 class Wan_Fun_Controller(Fun_Controller):
@@ -117,22 +118,36 @@ class Wan_Fun_Controller(Fun_Controller):
             )
 
         if self.ulysses_degree > 1 or self.ring_degree > 1:
+            from functools import partial
             self.transformer.enable_multi_gpus_inference()
+            if self.fsdp_dit:
+                shard_fn = partial(shard_model, device_id=self.device, param_dtype=self.weight_dtype)
+                self.pipeline.transformer = shard_fn(self.pipeline.transformer)
+                print("Add FSDP DIT")
+            if self.fsdp_text_encoder:
+                shard_fn = partial(shard_model, device_id=self.device, param_dtype=self.weight_dtype)
+                self.pipeline.text_encoder = shard_fn(self.pipeline.text_encoder)
+                print("Add FSDP TEXT ENCODER")
+
+        if self.compile_dit:
+            for i in range(len(self.pipeline.transformer.blocks)):
+                self.pipeline.transformer.blocks[i] = torch.compile(self.pipeline.transformer.blocks[i])
+            print("Add Compile")
 
         if self.GPU_memory_mode == "sequential_cpu_offload":
             replace_parameters_by_name(self.transformer, ["modulation",], device=self.device)
             self.transformer.freqs = self.transformer.freqs.to(device=self.device)
             self.pipeline.enable_sequential_cpu_offload(device=self.device)
         elif self.GPU_memory_mode == "model_cpu_offload_and_qfloat8":
-            convert_model_weight_to_float8(self.transformer, exclude_module_name=["modulation",])
+            convert_model_weight_to_float8(self.transformer, exclude_module_name=["modulation",], device=self.device)
             convert_weight_dtype_wrapper(self.transformer, self.weight_dtype)
             self.pipeline.enable_model_cpu_offload(device=self.device)
         elif self.GPU_memory_mode == "model_cpu_offload":
             self.pipeline.enable_model_cpu_offload(device=self.device)
         elif self.GPU_memory_mode == "model_full_load_and_qfloat8":
-            convert_model_weight_to_float8(self.transformer, exclude_module_name=["modulation",])
+            convert_model_weight_to_float8(self.transformer, exclude_module_name=["modulation",], device=self.device)
             convert_weight_dtype_wrapper(self.transformer, self.weight_dtype)
-            self.pipeline.to(device=self.device)
+            self.pipeline.to(self.device)
         else:
             self.pipeline.to(self.device)
         print("Update diffusion transformer done")
@@ -219,7 +234,11 @@ class Wan_Fun_Controller(Fun_Controller):
         else:
             print(f"Disable TeaCache.")
             self.pipeline.transformer.disable_teacache()
-            
+
+        if cfg_skip_ratio is not None and cfg_skip_ratio >= 0:
+            print(f"Enable cfg_skip_ratio {cfg_skip_ratio}.")
+            self.pipeline.transformer.enable_cfg_skip(cfg_skip_ratio, sample_step_slider)
+
         print(f"Generate seed.")
         if int(seed_textbox) != -1 and seed_textbox != "": torch.manual_seed(int(seed_textbox))
         else: seed_textbox = np.random.randint(0, 1e10)
@@ -253,7 +272,6 @@ class Wan_Fun_Controller(Fun_Controller):
                         video               = input_video,
                         mask_video          = input_video_mask,
                         clip_image          = clip_image,
-                        cfg_skip_ratio      = cfg_skip_ratio,
                     ).videos
                 else:
                     sample = self.pipeline(
@@ -265,7 +283,6 @@ class Wan_Fun_Controller(Fun_Controller):
                         height              = height_slider,
                         num_frames          = length_slider if not is_image else 1,
                         generator           = generator,
-                        cfg_skip_ratio      = cfg_skip_ratio,
                     ).videos
             else:
                 if ref_image is not None:
@@ -297,11 +314,14 @@ class Wan_Fun_Controller(Fun_Controller):
                     ref_image = ref_image,
                     start_image = start_image,
                     clip_image = clip_image,
-                    cfg_skip_ratio = cfg_skip_ratio,
                 ).videos
             print(f"Generation done.")
         except Exception as e:
+            self.auto_model_clear_cache(self.pipeline.transformer)
+            self.auto_model_clear_cache(self.pipeline.text_encoder)
+            self.auto_model_clear_cache(self.pipeline.vae)
             self.clear_cache()
+
             print(f"Error. error information is {str(e)}")
             if self.lora_model_path != "none":
                 self.pipeline = unmerge_lora(self.pipeline, self.lora_model_path, multiplier=lora_alpha_slider)
@@ -343,10 +363,10 @@ class Wan_Fun_Controller(Fun_Controller):
 Wan_Fun_Controller_Host = Wan_Fun_Controller
 Wan_Fun_Controller_Client = Fun_Controller_Client
 
-def ui(GPU_memory_mode, scheduler_dict, config_path, ulysses_degree, ring_degree, weight_dtype, savedir_sample=None):
+def ui(GPU_memory_mode, scheduler_dict, config_path, compile_dit, weight_dtype, savedir_sample=None):
     controller = Wan_Fun_Controller(
         GPU_memory_mode, scheduler_dict, model_name=None, model_type="Inpaint", 
-        config_path=config_path, ulysses_degree=ulysses_degree, ring_degree=ring_degree,
+        config_path=config_path, compile_dit=compile_dit,
         weight_dtype=weight_dtype, savedir_sample=savedir_sample,
     )
 
@@ -481,10 +501,10 @@ def ui(GPU_memory_mode, scheduler_dict, config_path, ulysses_degree, ring_degree
             )
     return demo, controller
 
-def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path, ulysses_degree, ring_degree, weight_dtype, savedir_sample=None):
+def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path, compile_dit, weight_dtype, savedir_sample=None):
     controller = Wan_Fun_Controller_Host(
         GPU_memory_mode, scheduler_dict, model_name=model_name, model_type=model_type, 
-        config_path=config_path, ulysses_degree=ulysses_degree, ring_degree=ring_degree,
+        config_path=config_path, compile_dit=compile_dit,
         weight_dtype=weight_dtype, savedir_sample=savedir_sample,
     )
 

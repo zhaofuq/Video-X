@@ -1,15 +1,16 @@
 import numpy as np
 import torch
 
+import importlib.util
 
 def get_teacache_coefficients(model_name):
     if "wan2.1-t2v-1.3b" in model_name.lower() or "wan2.1-fun-1.3b" in model_name.lower() or "wan2.1-fun-v1.1-1.3b" in model_name.lower():
         return [-5.21862437e+04, 9.23041404e+03, -5.28275948e+02, 1.36987616e+01, -4.99875664e-02]
-    elif "wan2.1-t2v-14b" in model_name.lower() or "wan2.1-fun-v1.1-14b" in model_name.lower():
+    elif "wan2.1-t2v-14b" in model_name.lower():
         return [-3.03318725e+05, 4.90537029e+04, -2.65530556e+03, 5.87365115e+01, -3.15583525e-01]
     elif "wan2.1-i2v-14b-480p" in model_name.lower():
         return [2.57151496e+05, -3.54229917e+04,  1.40286849e+03, -1.35890334e+01, 1.32517977e-01]
-    elif "wan2.1-i2v-14b-720p" in model_name.lower() or "wan2.1-fun-14b" in model_name.lower():
+    elif "wan2.1-i2v-14b-720p" in model_name.lower() or "wan2.1-fun-14b" in model_name.lower() or "wan2.1-fun-v1.1-14b" in model_name.lower():
         return [8.10705460e+03,  2.13393892e+03, -3.72934672e+02,  1.66203073e+01, -4.17769401e-02]
     else:
         print(f"The model {model_name} is not supported by TeaCache.")
@@ -72,3 +73,62 @@ class TeaCache():
         self.previous_residual = None
         self.previous_residual_cond = None
         self.previous_residual_uncond = None
+
+
+if importlib.util.find_spec("pai_fuser") is not None:
+    from pai_fuser.core import (cfg_skip_turbo, enable_cfg_skip, 
+                                disable_cfg_skip)
+    cfg_skip = cfg_skip_turbo
+    print("Enable CFG Skip Turbo")
+else:
+    def cfg_skip():
+        def decorator(func):
+            def wrapper(self, x, *args, **kwargs):
+                if self.cfg_skip_ratio is not None and self.current_steps >= self.num_inference_steps * (1 - self.cfg_skip_ratio):
+                    bs = len(x)
+                    bs_half = int(bs // 2)
+
+                    new_x = x[bs_half:]
+                    
+                    new_args = []
+                    for arg in args:
+                        if isinstance(arg, (torch.Tensor, list, tuple, np.ndarray)):
+                            new_args.append(arg[bs_half:])
+                        else:
+                            new_args.append(arg)
+
+                    new_kwargs = {}
+                    for key, content in kwargs.items():
+                        if isinstance(content, (torch.Tensor, list, tuple, np.ndarray)):
+                            new_kwargs[key] = content[bs_half:]
+                        else:
+                            new_kwargs[key] = content
+                else:
+                    new_x = x
+                    new_args = args
+                    new_kwargs = kwargs
+
+                result = func(self, new_x, *new_args, **new_kwargs)
+
+                if self.cfg_skip_ratio is not None and self.current_steps >= self.num_inference_steps * (1 - self.cfg_skip_ratio):
+                    result = torch.cat([result, result], dim=0)
+
+                return result
+            return wrapper
+        return decorator
+    
+    def enable_cfg_skip():
+        def decorator(func):
+            def wrapper(self, cfg_skip_ratio, num_steps, *args, **kwargs):
+                func(self, cfg_skip_ratio, num_steps, *args, **kwargs)
+                return
+            return wrapper
+        return decorator
+
+    def disable_cfg_skip():
+        def decorator(func):
+            def wrapper(self, *args, **kwargs):
+                func(self, *args, **kwargs)
+                return 
+            return wrapper
+        return decorator
