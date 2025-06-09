@@ -4,6 +4,7 @@ from .pipeline_cogvideox_fun_inpaint import CogVideoXFunInpaintPipeline
 from .pipeline_wan_fun import WanFunPipeline
 from .pipeline_wan_fun_inpaint import WanFunInpaintPipeline
 from .pipeline_wan_fun_control import WanFunControlPipeline
+from .pipeline_wan_phantom import WanFunPhantomPipeline
 
 WanPipeline = WanFunPipeline
 WanI2VPipeline = WanFunInpaintPipeline
@@ -18,3 +19,4 @@ if importlib.util.find_spec("pai_fuser") is not None:
     WanFunControlPipeline.__call__ = sparse_reset(WanFunControlPipeline.__call__)
     WanI2VPipeline.__call__ = sparse_reset(WanI2VPipeline.__call__)
     WanPipeline.__call__ = sparse_reset(WanPipeline.__call__)
+    WanFunPhantomPipeline.__call__ = sparse_reset(WanFunPhantomPipeline.__call__)

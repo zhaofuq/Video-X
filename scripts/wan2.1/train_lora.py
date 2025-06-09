@@ -683,6 +683,9 @@ def parse_args():
         "--use_deepspeed", action="store_true", help="Whether or not to use deepspeed."
     )
     parser.add_argument(
+        "--use_fsdp", action="store_true", help="Whether or not to use fsdp."
+    )
+    parser.add_argument(
         "--low_vram", action="store_true", help="Whether enable low_vram mode."
     )
     parser.add_argument(
@@ -756,12 +759,28 @@ def main():
         project_config=accelerator_project_config,
     )
     deepspeed_plugin = accelerator.state.deepspeed_plugin
+    fsdp_plugin = accelerator.state.fsdp_plugin
     if deepspeed_plugin is not None:
         zero_stage = int(deepspeed_plugin.zero_stage)
+        fsdp_stage = 0
         print(f"Using DeepSpeed Zero stage: {zero_stage}")
+
+        args.use_deepspeed = True
+    elif fsdp_plugin is not None:
+        from torch.distributed.fsdp import ShardingStrategy
+        zero_stage = 0
+        if fsdp_plugin.sharding_strategy is ShardingStrategy.FULL_SHARD:
+            fsdp_stage = 3
+        elif fsdp_plugin.sharding_strategy is ShardingStrategy.SHARD_GRAD_OP:
+            fsdp_stage = 2
+        print(f"Using FSDP stage: {fsdp_stage}")
+
+        args.use_fsdp = True
     else:
         zero_stage = 0
+        fsdp_stage = 0
         print("DeepSpeed is not enabled.")
+
     if accelerator.is_main_process:
         writer = SummaryWriter(log_dir=logging_dir)
 
@@ -911,15 +930,34 @@ def main():
     # `accelerate` 0.16.0 will have better support for customized saving
     if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
         # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
-        if zero_stage != 3:
+        if fsdp_stage != 0:
+            def save_model_hook(models, weights, output_dir):
+                accelerate_state_dict = accelerator.get_state_dict(models[-1], unwrap=True)
+                if accelerator.is_main_process:
+                    from safetensors.torch import save_file
+
+                    safetensor_save_path = os.path.join(output_dir, f"lora_diffusion_pytorch_model.safetensors")
+                    network_state_dict = {}
+                    for key in accelerate_state_dict:
+                        if "network" in key:
+                            network_state_dict[key.replace("network.", "")] = accelerate_state_dict[key]
+
+                    save_file(network_state_dict, safetensor_save_path, metadata={"format": "pt"})
+
+                    with open(os.path.join(output_dir, "sampler_pos_start.pkl"), 'wb') as file:
+                        pickle.dump([batch_sampler.sampler._pos_start, first_epoch], file)
+
+            def load_model_hook(models, input_dir):
+                pkl_path = os.path.join(input_dir, "sampler_pos_start.pkl")
+                if os.path.exists(pkl_path):
+                    with open(pkl_path, 'rb') as file:
+                        loaded_number, _ = pickle.load(file)
+                        batch_sampler.sampler._pos_start = max(loaded_number - args.dataloader_num_workers * accelerator.num_processes * 2, 0)
+                    print(f"Load pkl from {pkl_path}. Get loaded_number = {loaded_number}.")
+
+        elif zero_stage == 3:
             def save_model_hook(models, weights, output_dir):
                 if accelerator.is_main_process:
-                    safetensor_save_path = os.path.join(output_dir, f"lora_diffusion_pytorch_model.safetensors")
-                    save_model(safetensor_save_path, accelerator.unwrap_model(models[-1]))
-                    if not args.use_deepspeed:
-                        for _ in range(len(weights)):
-                            weights.pop()
-
                     with open(os.path.join(output_dir, "sampler_pos_start.pkl"), 'wb') as file:
                         pickle.dump([batch_sampler.sampler._pos_start, first_epoch], file)
 
@@ -933,6 +971,12 @@ def main():
         else:
             def save_model_hook(models, weights, output_dir):
                 if accelerator.is_main_process:
+                    safetensor_save_path = os.path.join(output_dir, f"lora_diffusion_pytorch_model.safetensors")
+                    save_model(safetensor_save_path, accelerator.unwrap_model(models[-1]))
+                    if not args.use_deepspeed:
+                        for _ in range(len(weights)):
+                            weights.pop()
+
                     with open(os.path.join(output_dir, "sampler_pos_start.pkl"), 'wb') as file:
                         pickle.dump([batch_sampler.sampler._pos_start, first_epoch], file)
 
@@ -1222,9 +1266,16 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        network, optimizer, train_dataloader, lr_scheduler
-    )
+    if fsdp_stage != 0:
+        transformer3d.network = network
+        transformer3d = transformer3d.to(weight_dtype)
+        transformer3d, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+            transformer3d, optimizer, train_dataloader, lr_scheduler
+        )
+    else:
+        network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+            network, optimizer, train_dataloader, lr_scheduler
+        )
 
     # Move text_encode and vae to gpu and cast to weight_dtype
     vae.to(accelerator.device, dtype=weight_dtype)
@@ -1636,7 +1687,7 @@ def main():
                     target_shape[1]
                 )
                 # Predict the noise residual
-                with torch.cuda.amp.autocast(dtype=weight_dtype):
+                with torch.cuda.amp.autocast(dtype=weight_dtype), torch.cuda.device(device=accelerator.device):
                     noise_pred = transformer3d(
                         x=noisy_latents,
                         context=prompt_embeds,
@@ -1688,7 +1739,7 @@ def main():
                 train_loss = 0.0
 
                 if global_step % args.checkpointing_steps == 0:
-                    if args.use_deepspeed or accelerator.is_main_process:
+                    if args.use_deepspeed or args.use_fsdp or accelerator.is_main_process:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)

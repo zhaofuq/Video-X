@@ -183,8 +183,9 @@ def attention(
     deterministic=False,
     dtype=torch.bfloat16,
     fa_version=None,
+    attention_type=None,
 ):
-    attention_type = os.environ.get("VIDEOX_ATTENTION_TYPE", "FLASH_ATTENTION")
+    attention_type = os.environ.get("VIDEOX_ATTENTION_TYPE", "FLASH_ATTENTION") if attention_type is None else attention_type
     if torch.is_grad_enabled() and attention_type == "SAGE_ATTENTION":
         attention_type = "FLASH_ATTENTION"
 
@@ -921,6 +922,7 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         y=None,
         y_camera=None,
         full_ref=None,
+        subject_ref=None,
         cond_flag=True,
     ):
         r"""
@@ -974,6 +976,13 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             seq_len += full_ref.size(1)
             x = [torch.concat([_full_ref.unsqueeze(0), u], dim=1) for _full_ref, u in zip(full_ref, x)]
 
+        if subject_ref is not None:
+            subject_ref_frames = subject_ref.size(2)
+            subject_ref = self.patch_embedding(subject_ref).flatten(2).transpose(1, 2)
+            grid_sizes = torch.stack([torch.tensor([u[0] + subject_ref_frames, u[1], u[2]]) for u in grid_sizes]).to(grid_sizes.device)
+            seq_len += subject_ref.size(1)
+            x = [torch.concat([u, _subject_ref.unsqueeze(0)], dim=1) for _subject_ref, u in zip(subject_ref, x)]
+        
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
         if self.sp_world_size > 1:
             seq_len = int(math.ceil(seq_len / self.sp_world_size)) * self.sp_world_size
@@ -1124,6 +1133,11 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             full_ref_length = full_ref.size(1)
             x = x[:, full_ref_length:]
             grid_sizes = torch.stack([torch.tensor([u[0] - 1, u[1], u[2]]) for u in grid_sizes]).to(grid_sizes.device)
+
+        if subject_ref is not None:
+            subject_ref_length = subject_ref[0].size(1)
+            x = x[:, :-subject_ref_length]
+            grid_sizes = torch.stack([torch.tensor([u[0] - subject_ref_frames, u[1], u[2]]) for u in grid_sizes]).to(grid_sizes.device)
 
         # head
         x = self.head(x, e)
