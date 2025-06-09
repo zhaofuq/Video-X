@@ -758,8 +758,9 @@ def main():
         log_with=args.report_to,
         project_config=accelerator_project_config,
     )
-    deepspeed_plugin = accelerator.state.deepspeed_plugin
-    fsdp_plugin = accelerator.state.fsdp_plugin
+
+    deepspeed_plugin = accelerator.state.deepspeed_plugin if hasattr(accelerator.state, "deepspeed_plugin") else None
+    fsdp_plugin = accelerator.state.fsdp_plugin if hasattr(accelerator.state, "fsdp_plugin") else None
     if deepspeed_plugin is not None:
         zero_stage = int(deepspeed_plugin.zero_stage)
         fsdp_stage = 0
