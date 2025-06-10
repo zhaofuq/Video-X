@@ -743,8 +743,12 @@ def main():
         zero_stage = 0
         if fsdp_plugin.sharding_strategy is ShardingStrategy.FULL_SHARD:
             fsdp_stage = 3
+        elif fsdp_plugin.sharding_strategy is None: # The fsdp_plugin.sharding_strategy is None in FSDP 2.
+            fsdp_stage = 3
         elif fsdp_plugin.sharding_strategy is ShardingStrategy.SHARD_GRAD_OP:
             fsdp_stage = 2
+        else:
+            fsdp_stage = 0
         print(f"Using FSDP stage: {fsdp_stage}")
 
         args.use_fsdp = True

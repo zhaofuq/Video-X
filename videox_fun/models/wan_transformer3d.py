@@ -2,6 +2,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 
 import glob
+import importlib.metadata
 import json
 import math
 import os
@@ -17,6 +18,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders.single_file_model import FromOriginalModelMixin
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.utils import is_torch_version, logging
+from packaging import version
 from torch import nn
 
 from ..dist import (get_sequence_parallel_rank,
@@ -59,6 +61,13 @@ except:
     except:
         sageattn = None
         SAGE_ATTENTION_AVAILABLE = False
+
+try:
+    diffusers_version = importlib.metadata.version("diffusers")
+except importlib.metadata.PackageNotFoundError:
+    diffusers_version = "0.0.0"
+
+USE_NEW_SIGNATURE = version.parse(diffusers_version) >= version.parse("0.33.1")
 
 def flash_attention(
     q,
@@ -843,7 +852,14 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         self.gradient_checkpointing = False
         self.sp_world_size = 1
         self.sp_world_rank = 0
-    
+
+        if USE_NEW_SIGNATURE:
+            def _set_gradient_checkpointing(self, enable=False, gradient_checkpointing_func=None):
+                self.gradient_checkpointing = enable
+        else:
+            def _set_gradient_checkpointing(self, module, value=False):
+                self.gradient_checkpointing = value
+
     def enable_teacache(
         self,
         coefficients,
@@ -907,9 +923,6 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         for block in self.blocks:
             block.self_attn.forward = types.MethodType(
                 usp_attn_forward, block.self_attn)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        self.gradient_checkpointing = value
 
     @cfg_skip()
     def forward(
