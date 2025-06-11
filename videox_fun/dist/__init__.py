@@ -28,6 +28,17 @@ if importlib.util.find_spec("pai_fuser") is not None:
     from pai_fuser.core.rope import ENABLE_KERNEL, usp_fast_rope_apply_qk
 
     if ENABLE_KERNEL:
-        wan_xfuser.rope_apply_qk = usp_fast_rope_apply_qk
-        rope_apply_qk = usp_fast_rope_apply_qk
+        import torch
+        from .wan_xfuser import rope_apply
+
+        def adaptive_fast_usp_rope_apply_qk(q, k, grid_sizes, freqs):
+            if torch.is_grad_enabled():
+                q = rope_apply(q, grid_sizes, freqs)
+                k = rope_apply(k, grid_sizes, freqs)
+                return q, k
+            else:
+                return usp_fast_rope_apply_qk(q, k, grid_sizes, freqs)
+            
+        wan_xfuser.rope_apply_qk = adaptive_fast_usp_rope_apply_qk
+        rope_apply_qk = adaptive_fast_usp_rope_apply_qk
         print("Import PAI Fast rope")
