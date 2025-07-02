@@ -4,6 +4,7 @@ import base64
 import gc
 import json
 import os
+import hashlib
 import random
 from datetime import datetime
 from glob import glob
@@ -239,11 +240,13 @@ class Fun_Controller:
             if not os.path.exists(self.savedir_sample):
                 os.makedirs(self.savedir_sample, exist_ok=True)
             index = len([path for path in os.listdir(self.savedir_sample)]) + 1
-            prefix = str(index).zfill(3)
+            prefix = str(index).zfill(8)
+
+            md5_hash = hashlib.md5(sample.cpu().numpy().tobytes()).hexdigest()
 
             if is_image or length_slider == 1:
-                save_sample_path = os.path.join(self.savedir_sample, prefix + f".png")
-
+                save_sample_path = os.path.join(self.savedir_sample, prefix + f"-{md5_hash}.png")
+                print(f"Saving to {save_sample_path}")
                 image = sample[0, :, 0]
                 image = image.transpose(0, 1).transpose(1, 2)
                 image = (image * 255).numpy().astype(np.uint8)
@@ -251,7 +254,8 @@ class Fun_Controller:
                 image.save(save_sample_path)
 
             else:
-                save_sample_path = os.path.join(self.savedir_sample, prefix + f".mp4")
+                save_sample_path = os.path.join(self.savedir_sample, prefix + f"-{md5_hash}.mp4")
+                print(f"Saving to {save_sample_path}")
                 save_videos_grid(sample, save_sample_path, fps=fps)
             return save_sample_path
 
@@ -439,7 +443,7 @@ class Fun_Controller_Client:
             num_skip_start_steps = num_skip_start_steps, teacache_offload = teacache_offload, 
             cfg_skip_ratio = cfg_skip_ratio, enable_riflex = enable_riflex, riflex_k = riflex_k, 
         )
-        print(outputs)
+
         try:
             base64_encoding = outputs["base64_encoding"]
         except:
@@ -449,11 +453,14 @@ class Fun_Controller_Client:
 
         if not os.path.exists(self.savedir_sample):
             os.makedirs(self.savedir_sample, exist_ok=True)
+        md5_hash = hashlib.md5(decoded_data).hexdigest()
+
         index = len([path for path in os.listdir(self.savedir_sample)]) + 1
-        prefix = str(index).zfill(3)
+        prefix = str(index).zfill(8)
         
         if is_image or length_slider == 1:
-            save_sample_path = os.path.join(self.savedir_sample, prefix + f".png")
+            save_sample_path = os.path.join(self.savedir_sample, prefix + f"-{md5_hash}.png")
+            print(f"Saving to {save_sample_path}")
             with open(save_sample_path, "wb") as file:
                 file.write(decoded_data)
             if gradio_version_is_above_4:
@@ -461,7 +468,8 @@ class Fun_Controller_Client:
             else:
                 return gr.Image.update(value=save_sample_path, visible=True), gr.Video.update(value=None, visible=False), "Success"
         else:
-            save_sample_path = os.path.join(self.savedir_sample, prefix + f".mp4")
+            save_sample_path = os.path.join(self.savedir_sample, prefix + f"-{md5_hash}.mp4")
+            print(f"Saving to {save_sample_path}")
             with open(save_sample_path, "wb") as file:
                 file.write(decoded_data)
             if gradio_version_is_above_4:
