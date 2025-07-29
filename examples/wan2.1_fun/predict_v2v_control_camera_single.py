@@ -47,11 +47,11 @@ GPU_memory_mode     = "sequential_cpu_offload"
 # Please ensure that the product of ulysses_degree and ring_degree equals the number of GPUs used. 
 # For example, if you are using 8 GPUs, you can set ulysses_degree = 2 and ring_degree = 4.
 # If you are using 1 GPU, you can set ulysses_degree = 1 and ring_degree = 1.
-ulysses_degree      = 4
+ulysses_degree      = 1
 ring_degree         = 1
 # Use FSDP to save more GPU memory in multi gpus.
 fsdp_dit            = False
-fsdp_text_encoder   = False
+fsdp_text_encoder   = True
 # Compile will give a speedup in fixed resolution and need a little GPU memory. 
 # The compile_dit is not compatible with the fsdp_dit and sequential_cpu_offload.
 compile_dit         = False
@@ -109,16 +109,13 @@ fps                 = 16
 weight_dtype            = torch.bfloat16
 control_video           = None
 control_camera_txt      = "asset/Pan_Left.txt"
-start_image             = "asset/8.jpg"
+start_image             = "asset/7.png"
 ref_image               = None
 
 # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
 # 在neg prompt中添加"安静，固定"等词语可以增加动态性。
-# prompt                  = "一个小女孩正在户外玩耍。她穿着一件蓝色的短袖上衣和粉色的短裤，头发扎成一个可爱的辫子。她的脚上没有穿鞋，显得非常自然和随意。她正用一把红色的小铲子在泥土里挖土，似乎在进行某种有趣的活动，可能是种花或是挖掘宝藏。地上有一根长长的水管，可能是用来浇水的。背景是一片草地和一些绿色植物，阳光明媚，整个场景充满了童趣和生机。小女孩专注的表情和认真的动作让人感受到她的快乐和好奇心。"
-# negative_prompt         = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
-prompt                 = "蒙娜丽莎风格肖像，经典油画质感，高清细节，柔和自然光，表情保持不变，视角围绕头部缓慢移动，面部姿态一致，背景简洁干净，无装饰物，适合三维重建标定使用，颜色和形状一致，脸部轮廓清晰，边缘锐利，整体画面稳定，适合视频处理。"
-negative_prompt        = "模糊，低质量，重复内容，过度曝光，强烈阴影，动作模糊，背景杂乱，遮挡，非蒙娜丽莎风格，衣服变形，脸部表情变化，画风不统一，颜色漂移，文字，水印，物品遮挡。"
-
+prompt                  = "一个小女孩正在户外玩耍。她穿着一件蓝色的短袖上衣和粉色的短裤，头发扎成一个可爱的辫子。她的脚上没有穿鞋，显得非常自然和随意。她正用一把红色的小铲子在泥土里挖土，似乎在进行某种有趣的活动，可能是种花或是挖掘宝藏。地上有一根长长的水管，可能是用来浇水的。背景是一片草地和一些绿色植物，阳光明媚，整个场景充满了童趣和生机。小女孩专注的表情和认真的动作让人感受到她的快乐和好奇心。"
+negative_prompt         = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
 
 # Using longer neg prompt such as "Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art." can increase stability
 # Adding words such as "quiet, solid" to the neg prompt can increase dynamism.

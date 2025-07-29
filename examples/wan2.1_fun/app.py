@@ -20,7 +20,7 @@ if __name__ == "__main__":
     # "host" represents the hosting mode, where the model is loaded directly at startup and can be accessed via 
     #        the API to return generation results. 
     # "client" represents the client mode, offering a simple UI that sends requests to a remote API for generation.
-    ui_mode = "normal"
+    ui_mode = "host"
     
     # GPU memory mode, which can be choosen in [model_full_load, model_cpu_offload, model_cpu_offload_and_qfloat8, sequential_cpu_offload].
     # model_full_load means that the entire model will be moved to the GPU.
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     # 
     # sequential_cpu_offload means that each layer of the model will be moved to the CPU after use, 
     # resulting in slower speeds but saving a large amount of GPU memory.
-    GPU_memory_mode = "sequential_cpu_offload"
+    GPU_memory_mode = "model_cpu_offload"
     # Compile will give a speedup in fixed resolution and need a little GPU memory. 
     # The compile_dit is not compatible with the fsdp_dit and sequential_cpu_offload.
     compile_dit = False
@@ -46,12 +46,12 @@ if __name__ == "__main__":
     server_port = 7860
 
     # Config path
-    config_path = "config/wan2.1/wan_civitai.yaml"
+    config_path = "/root/code/VideoX-Fun/config/wan2.1/wan_civitai.yaml"
     # Params below is used when ui_mode = "host"
     # Model path of the pretrained model
-    model_name = "models/Diffusion_Transformer/Wan2.1-Fun-V1.1-1.3B-InP"
+    model_name = "/root/code/VideoX-Fun/models/Wan2.1-Fun-V1.1-1.3B-Control-Camera"
     # "Inpaint" or "Control"
-    model_type = "Inpaint"
+    model_type = "Control"
 
     if ui_mode == "host":
         demo, controller = ui_host(GPU_memory_mode, flow_scheduler_dict, model_name, model_type, config_path, compile_dit, weight_dtype)
