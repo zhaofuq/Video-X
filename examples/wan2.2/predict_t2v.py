@@ -57,9 +57,8 @@ enable_teacache     = True
 # Recommended to be set between 0.05 and 0.30. A larger threshold can cache more steps, speeding up the inference process, 
 # but it may cause slight differences between the generated content and the original content.
 # # --------------------------------------------------------------------------------------------------- #
-# | Model Name          | threshold | Model Name          | threshold | Model Name          | threshold |
-# | Wan2.1-T2V-1.3B     | 0.05~0.10 | Wan2.1-T2V-14B      | 0.10~0.15 | Wan2.1-I2V-14B-720P | 0.20~0.30 |
-# | Wan2.1-I2V-14B-480P | 0.20~0.25 | Wan2.1-Fun-*-1.3B-* | 0.05~0.10 | Wan2.1-Fun-*-14B-*  | 0.20~0.30 |
+# | Model Name          | threshold | Model Name          | threshold |
+# | Wan2.2-T2V-A14B     | 0.10~0.15 | Wan2.2-I2V-A14B     | 0.15~0.20 |
 # # --------------------------------------------------------------------------------------------------- #
 teacache_threshold  = 0.10
 # The number of steps to skip TeaCache at the beginning of the inference process, which can
@@ -91,9 +90,14 @@ sampler_name        = "Flow_Unipc"
 shift               = 12
 
 # Load pretrained model if need
-transformer_path    = None
-vae_path            = None
-lora_path           = None
+# The transformer_path is used for low noise model, the transformer_high_path is used for high noise model.
+transformer_path        = None
+transformer_high_path   = None
+vae_path                = None
+# Load lora model if need
+# The lora_path is used for low noise model, the lora_high_path is used for high noise model.
+lora_path               = None
+lora_high_path          = None
 
 # Other params
 sample_size         = [480, 832]
@@ -108,7 +112,9 @@ negative_prompt     = "色调艳丽，过曝，静态，细节模糊不清，字
 guidance_scale      = 6.0
 seed                = 43
 num_inference_steps = 50
+# The lora_weight is used for low noise model, the lora_high_weight is used for high noise model.
 lora_weight         = 0.55
+lora_high_weight    = 0.55
 save_path           = "samples/wan-videos-t2v"
 
 device = set_multi_gpus_devices(ulysses_degree, ring_degree)
@@ -139,6 +145,18 @@ if transformer_path is not None:
     state_dict = state_dict["state_dict"] if "state_dict" in state_dict else state_dict
 
     m, u = transformer.load_state_dict(state_dict, strict=False)
+    print(f"missing keys: {len(m)}, unexpected keys: {len(u)}")
+
+if transformer_high_path is not None:
+    print(f"From checkpoint: {transformer_high_path}")
+    if transformer_high_path.endswith("safetensors"):
+        from safetensors.torch import load_file, safe_open
+        state_dict = load_file(transformer_high_path)
+    else:
+        state_dict = torch.load(transformer_high_path, map_location="cpu")
+    state_dict = state_dict["state_dict"] if "state_dict" in state_dict else state_dict
+
+    m, u = transformer_2.load_state_dict(state_dict, strict=False)
     print(f"missing keys: {len(m)}, unexpected keys: {len(u)}")
 
 # Get Vae
@@ -243,19 +261,18 @@ if coefficients is not None:
     pipeline.transformer.enable_teacache(
         coefficients, num_inference_steps, teacache_threshold, num_skip_start_steps=num_skip_start_steps, offload=teacache_offload
     )
-    pipeline.transformer_2.enable_teacache(
-        coefficients, num_inference_steps, teacache_threshold, num_skip_start_steps=num_skip_start_steps, offload=teacache_offload
-    )
+    pipeline.transformer_2.share_teacache(transformer=pipeline.transformer)
 
 if cfg_skip_ratio is not None:
     print(f"Enable cfg_skip_ratio {cfg_skip_ratio}.")
     pipeline.transformer.enable_cfg_skip(cfg_skip_ratio, num_inference_steps)
-    pipeline.transformer_2.enable_cfg_skip(cfg_skip_ratio, num_inference_steps)
+    pipeline.transformer_2.share_cfg_skip(transformer=pipeline.transformer)
 
 generator = torch.Generator(device=device).manual_seed(seed)
 
 if lora_path is not None:
     pipeline = merge_lora(pipeline, lora_path, lora_weight, device=device)
+    pipeline = merge_lora(pipeline, lora_high_path, lora_high_weight, device=device, sub_transformer_name="transformer_2")
 
 with torch.no_grad():
     video_length = int((video_length - 1) // vae.config.temporal_compression_ratio * vae.config.temporal_compression_ratio) + 1 if video_length != 1 else 1
@@ -280,6 +297,7 @@ with torch.no_grad():
 
 if lora_path is not None:
     pipeline = unmerge_lora(pipeline, lora_path, lora_weight, device=device)
+    pipeline = unmerge_lora(pipeline, lora_high_path, lora_high_weight, device=device, sub_transformer_name="transformer_2")
 
 def save_results():
     if not os.path.exists(save_path):

@@ -879,11 +879,17 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         num_steps: int,
         rel_l1_thresh: float,
         num_skip_start_steps: int = 0,
-        offload: bool = True
+        offload: bool = True,
     ):
         self.teacache = TeaCache(
             coefficients, num_steps, rel_l1_thresh=rel_l1_thresh, num_skip_start_steps=num_skip_start_steps, offload=offload
         )
+
+    def share_teacache(
+        self,
+        transformer = None,
+    ):
+        self.teacache = transformer.teacache
 
     def disable_teacache(self):
         self.teacache = None
@@ -897,6 +903,14 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             self.cfg_skip_ratio = None
             self.current_steps = 0
             self.num_inference_steps = None
+
+    def share_cfg_skip(
+        self,
+        transformer = None,
+    ):
+        self.cfg_skip_ratio = transformer.cfg_skip_ratio
+        self.current_steps = transformer.current_steps
+        self.num_inference_steps = transformer.num_inference_steps
 
     def disable_cfg_skip(self):
         self.cfg_skip_ratio = None
@@ -1391,22 +1405,30 @@ class Wan2_2Transformer3DModel(WanTransformer3DModel):
     _supports_gradient_checkpointing = True
     
     @register_to_config
-    def __init__(self,
-                 model_type='t2v',
-                 patch_size=(1, 2, 2),
-                 text_len=512,
-                 in_dim=16,
-                 dim=2048,
-                 ffn_dim=8192,
-                 freq_dim=256,
-                 text_dim=4096,
-                 out_dim=16,
-                 num_heads=16,
-                 num_layers=32,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 cross_attn_norm=True,
-                 eps=1e-6):
+    def __init__(
+        self,
+        model_type='t2v',
+        patch_size=(1, 2, 2),
+        text_len=512,
+        in_dim=16,
+        dim=2048,
+        ffn_dim=8192,
+        freq_dim=256,
+        text_dim=4096,
+        out_dim=16,
+        num_heads=16,
+        num_layers=32,
+        window_size=(-1, -1),
+        qk_norm=True,
+        cross_attn_norm=True,
+        eps=1e-6,
+        in_channels=16,
+        hidden_size=2048,
+        add_control_adapter=False,
+        in_dim_control_adapter=24,
+        add_ref_conv=False,
+        in_dim_ref_conv=16,
+    ):
         r"""
         Initialize the diffusion model backbone.
         Args:
@@ -1458,6 +1480,7 @@ class Wan2_2Transformer3DModel(WanTransformer3DModel):
         self.qk_norm = qk_norm
         self.cross_attn_norm = cross_attn_norm
         self.eps = eps
+
         # embeddings
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size)
@@ -1472,6 +1495,10 @@ class Wan2_2Transformer3DModel(WanTransformer3DModel):
             WanAttentionBlock("cross_attn", dim, ffn_dim, num_heads, window_size, qk_norm,
                               cross_attn_norm, eps) for _ in range(num_layers)
         ])
+        for layer_idx, block in enumerate(self.blocks):
+            block.self_attn.layer_idx = layer_idx
+            block.self_attn.num_layers = self.num_layers
+
         # head
         self.head = Head(dim, out_dim, patch_size, eps)
         # buffers (don't use register_buffer otherwise dtype will be changed in to())
@@ -1483,5 +1510,19 @@ class Wan2_2Transformer3DModel(WanTransformer3DModel):
             rope_params(1024, 2 * (d // 6))
         ],
         dim=1)
+        
+        if add_control_adapter:
+            self.control_adapter = SimpleAdapter(in_dim_control_adapter, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
+        else:
+            self.control_adapter = None
+
+        if add_ref_conv:
+            self.ref_conv = nn.Conv2d(in_dim_ref_conv, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
+        else:
+            self.ref_conv = None
+        
+        if hasattr(self, "img_emb"):
+            del self.img_emb
+
         # initialize weights
         self.init_weights()
