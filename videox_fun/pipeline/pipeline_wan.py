@@ -5,21 +5,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-import torchvision.transforms.functional as TF
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
-from diffusers.image_processor import VaeImageProcessor
-from diffusers.models.embeddings import get_1d_rotary_pos_embed
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput, logging, replace_example_docstring
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
-from einops import rearrange
-from PIL import Image
-from transformers import T5Tokenizer
 
-from ..models import (AutoencoderKLWan, AutoTokenizer, CLIPModel,
+from ..models import (AutoencoderKLWan, AutoTokenizer,
                               WanT5EncoderModel, WanTransformer3DModel)
 from ..utils.fm_solvers import (FlowDPMSolverMultistepScheduler,
                                 get_sampling_sigmas)
@@ -96,43 +89,6 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-def resize_mask(mask, latent, process_first_frame_only=True):
-    latent_size = latent.size()
-    batch_size, channels, num_frames, height, width = mask.shape
-
-    if process_first_frame_only:
-        target_size = list(latent_size[2:])
-        target_size[0] = 1
-        first_frame_resized = F.interpolate(
-            mask[:, :, 0:1, :, :],
-            size=target_size,
-            mode='trilinear',
-            align_corners=False
-        )
-        
-        target_size = list(latent_size[2:])
-        target_size[0] = target_size[0] - 1
-        if target_size[0] != 0:
-            remaining_frames_resized = F.interpolate(
-                mask[:, :, 1:, :, :],
-                size=target_size,
-                mode='trilinear',
-                align_corners=False
-            )
-            resized_mask = torch.cat([first_frame_resized, remaining_frames_resized], dim=2)
-        else:
-            resized_mask = first_frame_resized
-    else:
-        target_size = list(latent_size[2:])
-        resized_mask = F.interpolate(
-            mask,
-            size=target_size,
-            mode='trilinear',
-            align_corners=False
-        )
-    return resized_mask
-
-
 @dataclass
 class WanPipelineOutput(BaseOutput):
     r"""
@@ -148,7 +104,7 @@ class WanPipelineOutput(BaseOutput):
     videos: torch.Tensor
 
 
-class WanFunInpaintPipeline(DiffusionPipeline):
+class WanPipeline(DiffusionPipeline):
     r"""
     Pipeline for text-to-video generation using Wan.
 
@@ -157,7 +113,7 @@ class WanFunInpaintPipeline(DiffusionPipeline):
     """
 
     _optional_components = []
-    model_cpu_offload_seq = "text_encoder->clip_image_encoder->transformer->vae"
+    model_cpu_offload_seq = "text_encoder->transformer->vae"
 
     _callback_tensor_inputs = [
         "latents",
@@ -171,20 +127,14 @@ class WanFunInpaintPipeline(DiffusionPipeline):
         text_encoder: WanT5EncoderModel,
         vae: AutoencoderKLWan,
         transformer: WanTransformer3DModel,
-        clip_image_encoder: CLIPModel,
         scheduler: FlowMatchEulerDiscreteScheduler,
     ):
         super().__init__()
 
         self.register_modules(
-            tokenizer=tokenizer, text_encoder=text_encoder, vae=vae, transformer=transformer, clip_image_encoder=clip_image_encoder, scheduler=scheduler
+            tokenizer=tokenizer, text_encoder=text_encoder, vae=vae, transformer=transformer, scheduler=scheduler
         )
-
         self.video_processor = VideoProcessor(vae_scale_factor=self.vae.spatial_compression_ratio)
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae.spatial_compression_ratio)
-        self.mask_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae.spatial_compression_ratio, do_normalize=False, do_binarize=True, do_convert_grayscale=True
-        )
 
     def _get_t5_prompt_embeds(
         self,
@@ -338,41 +288,6 @@ class WanFunInpaintPipeline(DiffusionPipeline):
             latents = latents * self.scheduler.init_noise_sigma
         return latents
 
-    def prepare_mask_latents(
-        self, mask, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance, noise_aug_strength
-    ):
-        # resize the mask to latents shape as we concatenate the mask to the latents
-        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
-        # and half precision
-
-        if mask is not None:
-            mask = mask.to(device=device, dtype=self.vae.dtype)
-            bs = 1
-            new_mask = []
-            for i in range(0, mask.shape[0], bs):
-                mask_bs = mask[i : i + bs]
-                mask_bs = self.vae.encode(mask_bs)[0]
-                mask_bs = mask_bs.mode()
-                new_mask.append(mask_bs)
-            mask = torch.cat(new_mask, dim = 0)
-            # mask = mask * self.vae.config.scaling_factor
-
-        if masked_image is not None:
-            masked_image = masked_image.to(device=device, dtype=self.vae.dtype)
-            bs = 1
-            new_mask_pixel_values = []
-            for i in range(0, masked_image.shape[0], bs):
-                mask_pixel_values_bs = masked_image[i : i + bs]
-                mask_pixel_values_bs = self.vae.encode(mask_pixel_values_bs)[0]
-                mask_pixel_values_bs = mask_pixel_values_bs.mode()
-                new_mask_pixel_values.append(mask_pixel_values_bs)
-            masked_image_latents = torch.cat(new_mask_pixel_values, dim = 0)
-            # masked_image_latents = masked_image_latents * self.vae.config.scaling_factor
-        else:
-            masked_image_latents = None
-
-        return mask, masked_image_latents
-
     def decode_latents(self, latents: torch.Tensor) -> torch.Tensor:
         frames = self.vae.decode(latents.to(self.vae.dtype)).sample
         frames = (frames / 2 + 0.5).clamp(0, 1)
@@ -474,8 +389,6 @@ class WanFunInpaintPipeline(DiffusionPipeline):
         negative_prompt: Optional[Union[str, List[str]]] = None,
         height: int = 480,
         width: int = 720,
-        video: Union[torch.FloatTensor] = None,
-        mask_video: Union[torch.FloatTensor] = None,
         num_frames: int = 49,
         num_inference_steps: int = 50,
         timesteps: Optional[List[int]] = None,
@@ -493,7 +406,6 @@ class WanFunInpaintPipeline(DiffusionPipeline):
         ] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        clip_image: Image = None,
         max_sequence_length: int = 512,
         comfyui_progressbar: bool = False,
         shift: int = 5,
@@ -575,18 +487,10 @@ class WanFunInpaintPipeline(DiffusionPipeline):
         self._num_timesteps = len(timesteps)
         if comfyui_progressbar:
             from comfy.utils import ProgressBar
-            pbar = ProgressBar(num_inference_steps + 2)
+            pbar = ProgressBar(num_inference_steps + 1)
 
-        # 5. Prepare latents.
-        if video is not None:
-            video_length = video.shape[2]
-            init_video = self.image_processor.preprocess(rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width) 
-            init_video = init_video.to(dtype=torch.float32)
-            init_video = rearrange(init_video, "(b f) c h w -> b c f h w", f=video_length)
-        else:
-            init_video = None
-
-        latent_channels = self.vae.config.latent_channels
+        # 5. Prepare latents
+        latent_channels = self.transformer.config.in_channels
         latents = self.prepare_latents(
             batch_size * num_videos_per_prompt,
             latent_channels,
@@ -598,55 +502,6 @@ class WanFunInpaintPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        if comfyui_progressbar:
-            pbar.update(1)
-
-        # Prepare mask latent variables
-        if init_video is not None:
-            if (mask_video == 255).all():
-                mask_latents = torch.tile(
-                    torch.zeros_like(latents)[:, :1].to(device, weight_dtype), [1, 4, 1, 1, 1]
-                )
-                masked_video_latents = torch.zeros_like(latents).to(device, weight_dtype)
-            else:
-                bs, _, video_length, height, width = video.size()
-                mask_condition = self.mask_processor.preprocess(rearrange(mask_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
-                mask_condition = mask_condition.to(dtype=torch.float32)
-                mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=video_length)
-
-                masked_video = init_video * (torch.tile(mask_condition, [1, 3, 1, 1, 1]) < 0.5)
-                _, masked_video_latents = self.prepare_mask_latents(
-                    None,
-                    masked_video,
-                    batch_size,
-                    height,
-                    width,
-                    weight_dtype,
-                    device,
-                    generator,
-                    do_classifier_free_guidance,
-                    noise_aug_strength=None,
-                )
-                
-                mask_condition = torch.concat(
-                    [
-                        torch.repeat_interleave(mask_condition[:, :, 0:1], repeats=4, dim=2), 
-                        mask_condition[:, :, 1:]
-                    ], dim=2
-                )
-                mask_condition = mask_condition.view(bs, mask_condition.shape[2] // 4, 4, height, width)
-                mask_condition = mask_condition.transpose(1, 2)
-                mask_latents = resize_mask(1 - mask_condition, masked_video_latents, True).to(device, weight_dtype) 
-
-        # Prepare clip latent variables
-        if clip_image is not None:
-            clip_image = TF.to_tensor(clip_image).sub_(0.5).div_(0.5).to(device, weight_dtype) 
-            clip_context = self.clip_image_encoder([clip_image[:, None, :, :]])
-        else:
-            clip_image = Image.new("RGB", (512, 512), color=(0, 0, 0))  
-            clip_image = TF.to_tensor(clip_image).sub_(0.5).div_(0.5).to(device, weight_dtype) 
-            clip_context = self.clip_image_encoder([clip_image[:, None, :, :]])
-            clip_context = torch.zeros_like(clip_context)
         if comfyui_progressbar:
             pbar.update(1)
 
@@ -669,17 +524,6 @@ class WanFunInpaintPipeline(DiffusionPipeline):
                 if hasattr(self.scheduler, "scale_model_input"):
                     latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                if init_video is not None:
-                    mask_input = torch.cat([mask_latents] * 2) if do_classifier_free_guidance else mask_latents
-                    masked_video_latents_input = (
-                        torch.cat([masked_video_latents] * 2) if do_classifier_free_guidance else masked_video_latents
-                    )
-                    y = torch.cat([mask_input, masked_video_latents_input], dim=1).to(device, weight_dtype) 
-
-                clip_context_input = (
-                    torch.cat([clip_context] * 2) if do_classifier_free_guidance else clip_context
-                )
-
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0])
                 
@@ -690,8 +534,6 @@ class WanFunInpaintPipeline(DiffusionPipeline):
                         context=in_prompt_embeds,
                         t=timestep,
                         seq_len=seq_len,
-                        y=y,
-                        clip_fea=clip_context_input,
                     )
 
                 # perform guidance
@@ -711,7 +553,7 @@ class WanFunInpaintPipeline(DiffusionPipeline):
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
                     negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
-                    
+
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
                 if comfyui_progressbar:
