@@ -1,4 +1,4 @@
-export MODEL_NAME="models/Diffusion_Transformer/Wan2.2-Fun-A14B-InP"
+export MODEL_NAME="models/Diffusion_Transformer/Wan2.2-Fun-A14B-Control"
 export DATASET_NAME="datasets/internal_datasets/"
 export DATASET_META_NAME="datasets/internal_datasets/metadata.json"
 # NCCL_IB_DISABLE=1 and NCCL_P2P_DISABLE=1 are used in multi nodes without RDMA. 
@@ -6,7 +6,7 @@ export DATASET_META_NAME="datasets/internal_datasets/metadata.json"
 # export NCCL_P2P_DISABLE=1
 NCCL_DEBUG=INFO
 
-accelerate launch --mixed_precision="bf16" scripts/wan2.2_fun/train_lora.py \
+accelerate launch --mixed_precision="bf16" scripts/wan2.2_fun/train_control.py \
   --config_path="config/wan2.2/wan_civitai_i2v.yaml" \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --train_data_dir=$DATASET_NAME \
@@ -22,7 +22,9 @@ accelerate launch --mixed_precision="bf16" scripts/wan2.2_fun/train_lora.py \
   --dataloader_num_workers=8 \
   --num_train_epochs=100 \
   --checkpointing_steps=50 \
-  --learning_rate=1e-04 \
+  --learning_rate=2e-05 \
+  --lr_scheduler="constant_with_warmup" \
+  --lr_warmup_steps=100 \
   --seed=42 \
   --output_dir="output_dir" \
   --gradient_checkpointing \
@@ -35,8 +37,9 @@ accelerate launch --mixed_precision="bf16" scripts/wan2.2_fun/train_lora.py \
   --training_with_video_token_length \
   --enable_bucket \
   --uniform_sampling \
-  --train_mode="inpaint" \
-  --boundary_type="low" \
-  --lora_skip_name="ffn" \
-  --boundary_type="low" \
-  --low_vram
+  --train_mode="control_ref" \
+  --control_ref_image="random" \
+  --add_inpaint_info \
+  --add_full_ref_image_in_self_attention \
+  --low_vram \
+  --trainable_modules "."

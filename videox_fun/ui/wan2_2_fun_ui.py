@@ -12,22 +12,24 @@ from PIL import Image
 from safetensors import safe_open
 
 from ..data.bucket_sampler import ASPECT_RATIO_512, get_closest_ratio
-from ..models import (AutoencoderKLWan, AutoencoderKLWan3_8, AutoTokenizer, CLIPModel,
-                      WanT5EncoderModel, Wan2_2Transformer3DModel)
+from ..dist import set_multi_gpus_devices, shard_model
+from ..models import (AutoencoderKLWan, AutoencoderKLWan3_8, AutoTokenizer,
+                      CLIPModel, Wan2_2Transformer3DModel, WanT5EncoderModel)
 from ..models.cache_utils import get_teacache_coefficients
-from ..pipeline import Wan2_2I2VPipeline, Wan2_2Pipeline, Wan2_2TI2VPipeline
+from ..pipeline import Wan2_2FunControlPipeline, Wan2_2FunPipeline, Wan2_2FunInpaintPipeline
 from ..utils.fp8_optimization import (convert_model_weight_to_float8,
                                       convert_weight_dtype_wrapper,
                                       replace_parameters_by_name)
 from ..utils.lora_utils import merge_lora, unmerge_lora
-from ..utils.utils import (filter_kwargs, get_image_to_video_latent, get_image_latent, timer,
-                           get_video_to_video_latent, save_videos_grid)
+from ..utils.utils import (filter_kwargs, get_image_latent,
+                           get_image_to_video_latent,
+                           get_video_to_video_latent, save_videos_grid, timer)
 from .controller import (Fun_Controller, Fun_Controller_Client,
                          all_cheduler_dict, css, ddpm_scheduler_dict,
                          flow_scheduler_dict, gradio_version,
                          gradio_version_is_above_4)
 from .ui import (create_cfg_and_seedbox, create_cfg_riflex_k,
-                 create_cfg_skip_params,
+                 create_cfg_skip_params, create_config,
                  create_fake_finetune_models_checkpoints,
                  create_fake_height_width, create_fake_model_checkpoints,
                  create_fake_model_type, create_finetune_models_checkpoints,
@@ -35,11 +37,10 @@ from .ui import (create_cfg_and_seedbox, create_cfg_riflex_k,
                  create_generation_methods_and_video_length,
                  create_height_width, create_model_checkpoints,
                  create_model_type, create_prompts, create_samplers,
-                 create_teacache_params, create_ui_outputs, create_config)
-from ..dist import set_multi_gpus_devices, shard_model
+                 create_teacache_params, create_ui_outputs)
 
 
-class Wan2_2_Controller(Fun_Controller):
+class Wan2_2_Fun_Controller(Fun_Controller):
     def update_diffusion_transformer(self, diffusion_transformer_dropdown):
         print(f"Update diffusion transformer: {diffusion_transformer_dropdown}")
         self.model_name = diffusion_transformer_dropdown
@@ -93,8 +94,8 @@ class Wan2_2_Controller(Fun_Controller):
 
         # Get pipeline
         if self.model_type == "Inpaint":
-            if "wan_civitai_5b" in self.config_path:
-                self.pipeline = Wan2_2TI2VPipeline(
+            if self.transformer.config.in_channels != self.vae.config.latent_channels:
+                self.pipeline = Wan2_2FunInpaintPipeline(
                     vae=self.vae,
                     tokenizer=self.tokenizer,
                     text_encoder=self.text_encoder,
@@ -103,26 +104,23 @@ class Wan2_2_Controller(Fun_Controller):
                     scheduler=self.scheduler,
                 )
             else:
-                if self.transformer.config.in_channels != self.vae.config.latent_channels:
-                    self.pipeline = Wan2_2I2VPipeline(
-                        vae=self.vae,
-                        tokenizer=self.tokenizer,
-                        text_encoder=self.text_encoder,
-                        transformer=self.transformer,
-                        transformer_2=self.transformer_2,
-                        scheduler=self.scheduler,
-                    )
-                else:
-                    self.pipeline = Wan2_2Pipeline(
-                        vae=self.vae,
-                        tokenizer=self.tokenizer,
-                        text_encoder=self.text_encoder,
-                        transformer=self.transformer,
-                        transformer_2=self.transformer_2,
-                        scheduler=self.scheduler,
-                    )
+                self.pipeline = Wan2_2FunPipeline(
+                    vae=self.vae,
+                    tokenizer=self.tokenizer,
+                    text_encoder=self.text_encoder,
+                    transformer=self.transformer,
+                    transformer_2=self.transformer_2,
+                    scheduler=self.scheduler,
+                )
         else:
-            raise ValueError("Not support now")
+            self.pipeline = Wan2_2FunControlPipeline(
+                vae=self.vae,
+                tokenizer=self.tokenizer,
+                text_encoder=self.text_encoder,
+                transformer=self.transformer,
+                transformer_2=self.transformer_2,
+                scheduler=self.scheduler,
+            )
 
         if self.ulysses_degree > 1 or self.ring_degree > 1:
             from functools import partial
@@ -329,12 +327,11 @@ class Wan2_2_Controller(Fun_Controller):
                         generator           = generator, 
                         boundary            = boundary
                     ).videos
-            else:                
+            else:
+                inpaint_video, inpaint_video_mask, clip_image = get_image_to_video_latent(start_image, end_image, video_length=length_slider if not is_image else 1, sample_size=(height_slider, width_slider))
+                
                 if ref_image is not None:
                     ref_image = get_image_latent(ref_image, sample_size=(height_slider, width_slider))
-                
-                if start_image is not None:
-                    start_image = get_image_latent(start_image, sample_size=(height_slider, width_slider))
 
                 input_video, input_video_mask, _, _ = get_video_to_video_latent(control_video, video_length=length_slider if not is_image else 1, sample_size=(height_slider, width_slider), fps=fps, ref_image=None)
 
@@ -348,10 +345,11 @@ class Wan2_2_Controller(Fun_Controller):
                     num_frames          = length_slider if not is_image else 1,
                     generator           = generator,
 
+                    video      = inpaint_video,
+                    mask_video   = inpaint_video_mask,
                     control_video = input_video,
                     ref_image = ref_image,
-                    start_image = start_image,
-                    boundary            = boundary
+                    boundary = boundary,
                 ).videos
             print(f"Generation done.")
         except Exception as e:
@@ -363,8 +361,6 @@ class Wan2_2_Controller(Fun_Controller):
             print(f"Error. error information is {str(e)}")
             if self.lora_model_path != "none":
                 self.pipeline = unmerge_lora(self.pipeline, self.lora_model_path, multiplier=lora_alpha_slider)
-                if self.transformer_2 is not None:
-                    self.pipeline = unmerge_lora(self.pipeline, self.lora_model_2_path, multiplier=lora_alpha_slider, sub_transformer_name="transformer_2")
             if is_api:
                 return "", f"Error. error information is {str(e)}"
             else:
@@ -375,8 +371,6 @@ class Wan2_2_Controller(Fun_Controller):
         if self.lora_model_path != "none":
             print(f"Unmerge Lora.")
             self.pipeline = unmerge_lora(self.pipeline, self.lora_model_path, multiplier=lora_alpha_slider)
-            if self.transformer_2 is not None:
-                self.pipeline = unmerge_lora(self.pipeline, self.lora_model_2_path, multiplier=lora_alpha_slider, sub_transformer_name="transformer_2")
             print(f"Unmerge Lora done.")
 
         print(f"Saving outputs.")
@@ -402,11 +396,11 @@ class Wan2_2_Controller(Fun_Controller):
                 else:
                     return gr.Image.update(visible=False, value=None), gr.Video.update(value=save_sample_path, visible=True), "Success"
 
-Wan2_2_Controller_Host = Wan2_2_Controller
-Wan2_2_Controller_Client = Fun_Controller_Client
+Wan2_2_Fun_Controller_Host = Wan2_2_Fun_Controller
+Wan2_2_Fun_Controller_Client = Fun_Controller_Client
 
 def ui(GPU_memory_mode, scheduler_dict, config_path, compile_dit, weight_dtype, savedir_sample=None):
-    controller = Wan2_2_Controller(
+    controller = Wan2_2_Fun_Controller(
         GPU_memory_mode, scheduler_dict, model_name=None, model_type="Inpaint", 
         config_path=config_path, compile_dit=compile_dit,
         weight_dtype=weight_dtype, savedir_sample=savedir_sample,
@@ -415,19 +409,23 @@ def ui(GPU_memory_mode, scheduler_dict, config_path, compile_dit, weight_dtype, 
     with gr.Blocks(css=css) as demo:
         gr.Markdown(
             """
-            # Wan2_2:
+            # Wan2.2-Fun:
+
+            A Wan with more flexible generation conditions, capable of producing videos of different resolutions, around 5 seconds, and fps 16 (frames 1 to 81), as well as image generated videos. 
+
+            [Github](https://github.com/aigc-apps/VideoX-Fun/)
             """
         )
         with gr.Column(variant="panel"):
             config_dropdown, config_refresh_button = create_config(controller)
-            model_type = create_model_type(visible=False)
+            model_type = create_model_type(visible=True)
             diffusion_transformer_dropdown, diffusion_transformer_refresh_button = \
                 create_model_checkpoints(controller, visible=True)
             base_model_dropdown, lora_model_dropdown, lora_alpha_slider, personalized_refresh_button = \
                 create_finetune_models_checkpoints(controller, visible=True, add_checkpoint_2=True)
             base_model_dropdown, base_model_2_dropdown = base_model_dropdown
             lora_model_dropdown, lora_model_2_dropdown = lora_model_dropdown
-
+            
             with gr.Row():
                 enable_teacache, teacache_threshold, num_skip_start_steps, teacache_offload = \
                     create_teacache_params(True, 0.10, 1, False)
@@ -452,7 +450,7 @@ def ui(GPU_memory_mode, scheduler_dict, config_path, compile_dit, weight_dtype, 
                             maximum_video_length=161,
                         )
                     image_to_video_col, video_to_video_col, control_video_col, source_method, start_image, template_gallery, end_image, validation_video, validation_video_mask, denoise_strength, control_video, ref_image = create_generation_method(
-                        ["Text to Video (文本到视频)", "Image to Video (图片到视频)"], prompt_textbox, support_end_image=False
+                        ["Text to Video (文本到视频)", "Image to Video (图片到视频)", "Video Control (视频控制)"], prompt_textbox, support_ref_image=True
                     )
                     cfg_scale_slider, seed_textbox, seed_button = create_cfg_and_seedbox(gradio_version_is_above_4)
 
@@ -551,7 +549,7 @@ def ui(GPU_memory_mode, scheduler_dict, config_path, compile_dit, weight_dtype, 
     return demo, controller
 
 def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path, compile_dit, weight_dtype, savedir_sample=None):
-    controller = Wan2_2_Controller_Host(
+    controller = Wan2_2_Fun_Controller_Host(
         GPU_memory_mode, scheduler_dict, model_name=model_name, model_type=model_type, 
         config_path=config_path, compile_dit=compile_dit,
         weight_dtype=weight_dtype, savedir_sample=savedir_sample,
@@ -560,7 +558,11 @@ def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path
     with gr.Blocks(css=css) as demo:
         gr.Markdown(
             """
-            # Wan2_2:
+            # Wan2.2-Fun:
+
+            A Wan with more flexible generation conditions, capable of producing videos of different resolutions, around 5 seconds, and fps 16 (frames 1 to 81), as well as image generated videos. 
+
+            [Github](https://github.com/aigc-apps/VideoX-Fun/)
             """
         )
         with gr.Column(variant="panel"):
@@ -595,7 +597,7 @@ def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path
                             maximum_video_length=161,
                         )
                     image_to_video_col, video_to_video_col, control_video_col, source_method, start_image, template_gallery, end_image, validation_video, validation_video_mask, denoise_strength, control_video, ref_image = create_generation_method(
-                        ["Text to Video (文本到视频)", "Image to Video (图片到视频)"], prompt_textbox
+                        ["Text to Video (文本到视频)", "Image to Video (图片到视频)", "Video Control (视频控制)"], prompt_textbox, support_ref_image=True
                     )
                     cfg_scale_slider, seed_textbox, seed_button = create_cfg_and_seedbox(gradio_version_is_above_4)
 
@@ -680,12 +682,16 @@ def ui_host(GPU_memory_mode, scheduler_dict, model_name, model_type, config_path
     return demo, controller
 
 def ui_client(scheduler_dict, model_name, savedir_sample=None):
-    controller = Wan2_2_Controller_Client(scheduler_dict, savedir_sample)
+    controller = Wan2_2_Fun_Controller_Client(scheduler_dict, savedir_sample)
 
     with gr.Blocks(css=css) as demo:
         gr.Markdown(
             """
-            # Wan2_2:
+            # Wan2.2-Fun:
+
+            A Wan with more flexible generation conditions, capable of producing videos of different resolutions, around 5 seconds, and fps 16 (frames 1 to 81), as well as image generated videos. 
+
+            [Github](https://github.com/aigc-apps/VideoX-Fun/)
             """
         )
         with gr.Column(variant="panel"):

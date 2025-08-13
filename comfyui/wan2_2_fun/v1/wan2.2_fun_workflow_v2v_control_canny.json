@@ -1,18 +1,20 @@
 {
-  "last_node_id": 100,
-  "last_link_id": 71,
+  "id": "90329caf-a94f-48a6-80d7-d6e167a8b1e3",
+  "revision": 0,
+  "last_node_id": 102,
+  "last_link_id": 78,
   "nodes": [
     {
       "id": 78,
       "type": "Note",
-      "pos": {
-        "0": 18,
-        "1": -46
-      },
-      "size": {
-        "0": 210,
-        "1": 58
-      },
+      "pos": [
+        18,
+        -46
+      ],
+      "size": [
+        210,
+        88
+      ],
       "flags": {},
       "order": 0,
       "mode": 0,
@@ -30,14 +32,14 @@
     {
       "id": 79,
       "type": "Note",
-      "pos": {
-        "0": 15.739953994750977,
-        "1": 462.38665771484375
-      },
-      "size": {
-        "0": 210,
-        "1": 58
-      },
+      "pos": [
+        15.739953994750977,
+        462.38665771484375
+      ],
+      "size": [
+        210,
+        88
+      ],
       "flags": {},
       "order": 1,
       "mode": 0,
@@ -55,14 +57,14 @@
     {
       "id": 88,
       "type": "Note",
-      "pos": {
-        "0": -99,
-        "1": 197
-      },
-      "size": {
-        "0": 326.1556091308594,
-        "1": 145.20904541015625
-      },
+      "pos": [
+        -99,
+        197
+      ],
+      "size": [
+        326.1556091308594,
+        145.20904541015625
+      ],
       "flags": {},
       "order": 2,
       "mode": 0,
@@ -80,14 +82,14 @@
     {
       "id": 89,
       "type": "Note",
-      "pos": {
-        "0": -192,
-        "1": -293
-      },
-      "size": {
-        "0": 427.074951171875,
-        "1": 143.9142608642578
-      },
+      "pos": [
+        -192,
+        -293
+      ],
+      "size": [
+        427.074951171875,
+        143.9142608642578
+      ],
       "flags": {},
       "order": 3,
       "mode": 0,
@@ -97,7 +99,7 @@
         "text": ""
       },
       "widgets_values": [
-        "When using the 1.3B model, you can set GPU_memory_mode to model_cpu_offload for faster generation. When using the 14B model, you can use sequential_cpu_offload to save GPU memory during generation.\n（在使用1.3B模型时，可以设置GPU_memory_mode为model_cpu_offload进行更快速度的生成，在使用14B模型时，可以使用sequential_cpu_offload节省显存，进行生成。）"
+        "When using the 14B model, you can use sequential_cpu_offload to save GPU memory during generation.\n（在使用14B模型时，可以使用sequential_cpu_offload节省显存，进行生成。）"
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -105,14 +107,14 @@
     {
       "id": 92,
       "type": "FunTextBox",
-      "pos": {
-        "0": 254,
-        "1": -46
-      },
-      "size": {
-        "0": 380.845703125,
-        "1": 157.68350219726562
-      },
+      "pos": [
+        254,
+        -46
+      ],
+      "size": [
+        380.845703125,
+        157.68350219726562
+      ],
       "flags": {},
       "order": 4,
       "mode": 0,
@@ -121,10 +123,10 @@
         {
           "name": "prompt",
           "type": "STRING_PROMPT",
+          "slot_index": 0,
           "links": [
-            68
-          ],
-          "slot_index": 0
+            73
+          ]
         }
       ],
       "title": "Positive Prompt（正向提示词）",
@@ -136,201 +138,43 @@
       ]
     },
     {
-      "id": 94,
-      "type": "FunTextBox",
-      "pos": {
-        "0": 258,
-        "1": 178
-      },
-      "size": {
-        "0": 368.5529479980469,
-        "1": 159.4075927734375
-      },
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "prompt",
-          "type": "STRING_PROMPT",
-          "links": [
-            69
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "FunTextBox"
-      },
-      "widgets_values": [
-        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
-      ]
-    },
-    {
-      "id": 85,
-      "type": "VHS_LoadVideo",
-      "pos": {
-        "0": 335,
-        "1": 476
-      },
-      "size": [
-        252.056640625,
-        262
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "meta_batch",
-          "type": "VHS_BatchManager",
-          "link": null,
-          "shape": 7
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": null,
-          "shape": 7
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            66
-          ],
-          "slot_index": 0,
-          "shape": 3
-        },
-        {
-          "name": "frame_count",
-          "type": "INT",
-          "links": null,
-          "shape": 3
-        },
-        {
-          "name": "audio",
-          "type": "AUDIO",
-          "links": null,
-          "shape": 3
-        },
-        {
-          "name": "video_info",
-          "type": "VHS_VIDEOINFO",
-          "links": null,
-          "shape": 3
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VHS_LoadVideo"
-      },
-      "widgets_values": {
-        "video": "00339.mp4",
-        "force_rate": 0,
-        "force_size": "Disabled",
-        "custom_width": 512,
-        "custom_height": 512,
-        "frame_load_cap": 0,
-        "skip_first_frames": 0,
-        "select_every_nth": 1,
-        "choose video to upload": "image",
-        "videopreview": {
-          "hidden": false,
-          "paused": false,
-          "params": {
-            "frame_load_cap": 0,
-            "skip_first_frames": 0,
-            "force_rate": 0,
-            "filename": "00339.mp4",
-            "type": "input",
-            "format": "video/mp4",
-            "select_every_nth": 1
-          }
-        }
-      }
-    },
-    {
-      "id": 97,
-      "type": "VideoToCanny",
-      "pos": {
-        "0": 729,
-        "1": 566
-      },
-      "size": {
-        "0": 315,
-        "1": 106
-      },
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "input_video",
-          "type": "IMAGE",
-          "link": 66
-        }
-      ],
-      "outputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "links": [
-            65,
-            70
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VideoToCanny"
-      },
-      "widgets_values": [
-        100,
-        200,
-        81
-      ]
-    },
-    {
       "id": 99,
       "type": "VHS_VideoCombine",
-      "pos": {
-        "0": 1094,
-        "1": 559
-      },
-      "size": {
-        "0": 315,
-        "1": 310
-      },
+      "pos": [
+        1094,
+        559
+      ],
+      "size": [
+        315,
+        851.4834594726562
+      ],
       "flags": {},
       "order": 9,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
+          "shape": 7,
           "type": "IMAGE",
-          "link": 65,
-          "shape": 7
+          "link": 65
         },
         {
           "name": "audio",
+          "shape": 7,
           "type": "AUDIO",
-          "link": null,
-          "shape": 7
+          "link": null
         },
         {
           "name": "meta_batch",
+          "shape": 7,
           "type": "VHS_BatchManager",
-          "link": null,
-          "shape": 7
+          "link": null
         },
         {
           "name": "vae",
+          "shape": 7,
           "type": "VAE",
-          "link": null,
-          "shape": 7
+          "link": null
         }
       ],
       "outputs": [
@@ -367,57 +211,163 @@
       }
     },
     {
+      "id": 94,
+      "type": "FunTextBox",
+      "pos": [
+        258,
+        178
+      ],
+      "size": [
+        368.5529479980469,
+        159.4075927734375
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "prompt",
+          "type": "STRING_PROMPT",
+          "slot_index": 0,
+          "links": [
+            74
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FunTextBox"
+      },
+      "widgets_values": [
+        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+      ]
+    },
+    {
+      "id": 97,
+      "type": "VideoToCanny",
+      "pos": [
+        729,
+        566
+      ],
+      "size": [
+        315,
+        106
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "input_video",
+          "type": "IMAGE",
+          "link": 66
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            65,
+            75
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoToCanny"
+      },
+      "widgets_values": [
+        100,
+        200,
+        81
+      ]
+    },
+    {
+      "id": 101,
+      "type": "LoadWan2_2FunModel",
+      "pos": [
+        306.2298583984375,
+        -313.5478515625
+      ],
+      "size": [
+        397.9565734863281,
+        154
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "funmodels",
+          "type": "FunModels",
+          "links": [
+            78
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadWan2_2FunModel"
+      },
+      "widgets_values": [
+        "Wan2.2-Fun-A14B-Control",
+        "Control",
+        "sequential_cpu_offload",
+        "wan2.2/wan_civitai_i2v.yaml",
+        "bf16"
+      ]
+    },
+    {
       "id": 17,
       "type": "VHS_VideoCombine",
-      "pos": {
-        "0": 1467,
-        "1": -158
-      },
+      "pos": [
+        1465.6671142578125,
+        -174.95152282714844
+      ],
       "size": [
         390.9534912109375,
-        966.9860514322917
+        966.9860229492188
       ],
       "flags": {},
       "order": 11,
       "mode": 0,
       "inputs": [
         {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 71,
-          "slot_index": 0,
           "label": "图像",
-          "shape": 7
+          "name": "images",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 77
         },
         {
-          "name": "audio",
-          "type": "AUDIO",
-          "link": null,
           "label": "音频",
-          "shape": 7
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
         },
         {
-          "name": "meta_batch",
-          "type": "VHS_BatchManager",
-          "link": null,
           "label": "批次管理",
-          "shape": 7
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
         },
         {
           "name": "vae",
+          "shape": 7,
           "type": "VAE",
-          "link": null,
-          "shape": 7
+          "link": null
         }
       ],
       "outputs": [
         {
+          "label": "文件名",
           "name": "Filenames",
           "type": "VHS_FILENAMES",
-          "links": null,
           "slot_index": 0,
-          "shape": 3,
-          "label": "文件名"
+          "links": null
         }
       ],
       "properties": {
@@ -447,15 +397,96 @@
       }
     },
     {
-      "id": 100,
-      "type": "WanFunV2VSampler",
-      "pos": {
-        "0": 973,
-        "1": -160
-      },
+      "id": 85,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        335,
+        476
+      ],
       "size": [
-        428.4000244140625,
-        486
+        252.056640625,
+        409.87884521484375
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            66
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_LoadVideo"
+      },
+      "widgets_values": {
+        "video": "00000005.mp4",
+        "force_rate": 0,
+        "force_size": "Disabled",
+        "custom_width": 512,
+        "custom_height": 512,
+        "frame_load_cap": 0,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "choose video to upload": "image",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "frame_load_cap": 0,
+            "skip_first_frames": 0,
+            "force_rate": 0,
+            "filename": "00000005.mp4",
+            "type": "input",
+            "format": "video/mp4",
+            "select_every_nth": 1
+          }
+        }
+      }
+    },
+    {
+      "id": 102,
+      "type": "Wan2_2FunV2VSampler",
+      "pos": [
+        848.4100341796875,
+        -180.23484802246094
+      ],
+      "size": [
+        458.36383056640625,
+        526
       ],
       "flags": {},
       "order": 10,
@@ -464,56 +495,59 @@
         {
           "name": "funmodels",
           "type": "FunModels",
-          "link": 67
+          "link": 78
         },
         {
           "name": "prompt",
           "type": "STRING_PROMPT",
-          "link": 68
+          "link": 73
         },
         {
           "name": "negative_prompt",
           "type": "STRING_PROMPT",
-          "link": 69
+          "link": 74
         },
         {
           "name": "validation_video",
+          "shape": 7,
           "type": "IMAGE",
-          "link": null,
-          "shape": 7
+          "link": null
         },
         {
           "name": "control_video",
+          "shape": 7,
           "type": "IMAGE",
-          "link": 70,
-          "shape": 7
+          "link": 75
         },
         {
           "name": "start_image",
+          "shape": 7,
           "type": "IMAGE",
-          "link": null,
-          "shape": 7
+          "link": null
+        },
+        {
+          "name": "end_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
         },
         {
           "name": "ref_image",
+          "shape": 7,
           "type": "IMAGE",
-          "link": null,
-          "shape": 7
-        },
-        {
-          "name": "riflex_k",
-          "type": "RIFLEXT_ARGS",
-          "link": null,
-          "shape": 7
+          "link": null
         },
         {
           "name": "camera_conditions",
+          "shape": 7,
           "type": "STRING",
-          "link": null,
-          "widget": {
-            "name": "camera_conditions"
-          },
-          "shape": 7
+          "link": null
+        },
+        {
+          "name": "riflex_k",
+          "shape": 7,
+          "type": "RIFLEXT_ARGS",
+          "link": null
         }
       ],
       "outputs": [
@@ -521,12 +555,12 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            71
+            77
           ]
         }
       ],
       "properties": {
-        "Node name for S&R": "WanFunV2VSampler"
+        "Node name for S&R": "Wan2_2FunV2VSampler"
       },
       "widgets_values": [
         81,
@@ -534,50 +568,14 @@
         43,
         "fixed",
         50,
-        6,
-        1.0,
+        6.000000000000001,
+        1,
         "Flow",
         0.1,
         true,
         5,
         true,
         0
-      ]
-    },
-    {
-      "id": 95,
-      "type": "LoadWanFunModel",
-      "pos": {
-        "0": 275,
-        "1": -309
-      },
-      "size": {
-        "0": 435.2322082519531,
-        "1": 154
-      },
-      "flags": {},
-      "order": 7,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "funmodels",
-          "type": "FunModels",
-          "links": [
-            67
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadWanFunModel"
-      },
-      "widgets_values": [
-        "Wan2.1-Fun-V1.1-1.3B-Control",
-        "Control",
-        "model_cpu_offload",
-        "wan2.1/wan_civitai.yaml",
-        "bf16"
       ]
     }
   ],
@@ -599,48 +597,49 @@
       "IMAGE"
     ],
     [
-      67,
-      95,
-      0,
-      100,
-      0,
-      "FunModels"
-    ],
-    [
-      68,
+      73,
       92,
       0,
-      100,
+      102,
       1,
       "STRING_PROMPT"
     ],
     [
-      69,
+      74,
       94,
       0,
-      100,
+      102,
       2,
       "STRING_PROMPT"
     ],
     [
-      70,
+      75,
       97,
       0,
-      100,
+      102,
       4,
       "IMAGE"
     ],
     [
-      71,
-      100,
+      77,
+      102,
       0,
       17,
       0,
       "IMAGE"
+    ],
+    [
+      78,
+      101,
+      0,
+      102,
+      0,
+      "FunModels"
     ]
   ],
   "groups": [
     {
+      "id": 1,
       "title": "Upload Your Video",
       "bounding": [
         218,
@@ -653,6 +652,7 @@
       "flags": {}
     },
     {
+      "id": 2,
       "title": "Load Model",
       "bounding": [
         218,
@@ -665,6 +665,7 @@
       "flags": {}
     },
     {
+      "id": 3,
       "title": "Prompts",
       "bounding": [
         218,
@@ -682,17 +683,18 @@
     "ds": {
       "scale": 0.6830134553650709,
       "offset": [
-        249.86519634240904,
-        438.3739973625246
+        192.62803696741028,
+        413.1926211906501
       ]
     },
     "workspace_info": {
       "id": "776b62b4-bd17-4ed3-9923-b7aad000b1ea"
     },
     "node_versions": {
-      "CogVideoX-Fun": "717f0629175ad192927dc51ec95c4376816a4212",
+      "CogVideoX-Fun": "e935795d7684aaba72be65d2ad5ef580c0526f7a",
       "ComfyUI-VideoHelperSuite": "70faa9bcef65932ab72e7404d6373fb300013a2e"
-    }
+    },
+    "frontendVersion": "1.21.3"
   },
   "version": 0.4
 }
