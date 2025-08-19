@@ -81,6 +81,7 @@ class Fun_Controller:
         self.diffusion_transformer_dropdown = model_name
         self.scheduler_dict             = scheduler_dict
         self.model_type                 = model_type
+        self.config_path                = os.path.realpath(config_path)
         if config_path is not None:
             self.config = OmegaConf.load(config_path)
         self.ulysses_degree             = ulysses_degree
@@ -94,20 +95,34 @@ class Fun_Controller:
         self.diffusion_transformer_list = []
         self.motion_module_list         = []
         self.personalized_model_list    = []
+        self.config_list                = []
 
         # config models
         self.tokenizer             = None
         self.text_encoder          = None
         self.vae                   = None
         self.transformer           = None
+        self.transformer_2         = None
         self.pipeline              = None
         self.base_model_path       = "none"
+        self.base_model_2_path     = "none"
         self.lora_model_path       = "none"
+        self.lora_model_2_path     = "none"
         
+        self.refresh_config()
         self.refresh_diffusion_transformer()
         self.refresh_personalized_model()
         if model_name != None:
             self.update_diffusion_transformer(model_name)
+
+    def refresh_config(self):
+        config_list = []
+        for root, dirs, files in os.walk(self.config_dir):
+            for file in files:
+                if file.endswith(('.yaml', '.yml')):
+                    full_path = os.path.join(root, file)
+                    config_list.append(full_path)
+        self.config_list = config_list
 
     def refresh_diffusion_transformer(self):
         self.diffusion_transformer_list = sorted(glob(os.path.join(self.diffusion_transformer_dir, "*/")))
@@ -119,15 +134,27 @@ class Fun_Controller:
     def update_model_type(self, model_type):
         self.model_type = model_type
 
+    def update_config(self, config_dropdown):
+        self.config_path = config_dropdown
+        self.config = OmegaConf.load(config_dropdown)
+        print(f"Update config: {config_dropdown}")
+
     def update_diffusion_transformer(self, diffusion_transformer_dropdown):
         pass
 
-    def update_base_model(self, base_model_dropdown):
-        self.base_model_path = base_model_dropdown
+    def update_base_model(self, base_model_dropdown, is_checkpoint_2=False):
+        if not is_checkpoint_2:
+            self.base_model_path = base_model_dropdown
+        else:
+            self.base_model_2_path = base_model_dropdown
         print(f"Update base model: {base_model_dropdown}")
         if base_model_dropdown == "none":
             return gr.update()
-        if self.transformer is None:
+        if self.transformer is None and not is_checkpoint_2:
+            gr.Info(f"Please select a pretrained model path.")
+            print(f"Please select a pretrained model path.")
+            return gr.update(value=None)
+        elif self.transformer_2 is None and is_checkpoint_2:
             gr.Info(f"Please select a pretrained model path.")
             print(f"Please select a pretrained model path.")
             return gr.update(value=None)
@@ -137,17 +164,23 @@ class Fun_Controller:
             with safe_open(base_model_dropdown, framework="pt", device="cpu") as f:
                 for key in f.keys():
                     base_model_state_dict[key] = f.get_tensor(key)
-            self.transformer.load_state_dict(base_model_state_dict, strict=False)
+            if not is_checkpoint_2:
+                self.transformer.load_state_dict(base_model_state_dict, strict=False)
+            else:
+                self.transformer_2.load_state_dict(base_model_state_dict, strict=False)
             print("Update base model done")
             return gr.update()
 
-    def update_lora_model(self, lora_model_dropdown):
+    def update_lora_model(self, lora_model_dropdown, is_checkpoint_2=False):
         print(f"Update lora model: {lora_model_dropdown}")
         if lora_model_dropdown == "none":
             self.lora_model_path = "none"
             return gr.update()
         lora_model_dropdown = os.path.join(self.personalized_model_dir, lora_model_dropdown)
-        self.lora_model_path = lora_model_dropdown
+        if not is_checkpoint_2:
+            self.lora_model_path = lora_model_dropdown
+        else:
+            self.lora_model_2_path = lora_model_dropdown
         return gr.update()
 
     def clear_cache(self,):

@@ -1,6 +1,6 @@
-export MODEL_NAME="models/Diffusion_Transformer/Wan2.1-Fun-V1.1-14B-Control"
-export DATASET_NAME="datasets/internal_datasets/"
-export DATASET_META_NAME="datasets/internal_datasets/metadata.json"
+export MODEL_NAME="/root/code/workspace-vdm/ComfyUI/models/Fun_Models/Wan2.1-Fun-V1.1-1.3B-Control-Camera"
+export DATASET_NAME="/root/code/datasets/"
+export DATASET_META_NAME="/root/code/datasets/annotations.json"
 # NCCL_IB_DISABLE=1 and NCCL_P2P_DISABLE=1 are used in multi nodes without RDMA. 
 # export NCCL_IB_DISABLE=1
 # export NCCL_P2P_DISABLE=1
@@ -21,7 +21,7 @@ accelerate launch --mixed_precision="bf16" scripts/wan2.1_fun/train_control.py \
   --gradient_accumulation_steps=1 \
   --dataloader_num_workers=8 \
   --num_train_epochs=100 \
-  --checkpointing_steps=50 \
+  --checkpointing_steps=1000 \
   --learning_rate=2e-05 \
   --lr_scheduler="constant_with_warmup" \
   --lr_warmup_steps=100 \
@@ -38,7 +38,7 @@ accelerate launch --mixed_precision="bf16" scripts/wan2.1_fun/train_control.py \
   --enable_bucket \
   --uniform_sampling \
   --low_vram \
-  --train_mode="control_ref" \
+  --train_mode="control_camera_ref" \
   --control_ref_image="random" \
   --add_full_ref_image_in_self_attention \
   --trainable_modules "."

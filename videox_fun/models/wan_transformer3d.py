@@ -249,7 +249,7 @@ def sinusoidal_embedding_1d(dim, position):
     return x
 
 
-@amp.autocast(enabled=False)
+@torch.amp.autocast('cuda', enabled=False)
 def rope_params(max_seq_len, dim, theta=10000):
     assert dim % 2 == 0
     freqs = torch.outer(
@@ -260,7 +260,7 @@ def rope_params(max_seq_len, dim, theta=10000):
     return freqs
 
 # modified from https://github.com/thu-ml/RIFLEx/blob/main/riflex_utils.py
-@amp.autocast(enabled=False)
+@torch.amp.autocast('cuda', enabled=False)
 def get_1d_rotary_pos_embed_riflex(
     pos: Union[np.ndarray, int],
     dim: int,
@@ -337,7 +337,7 @@ def get_resize_crop_region_for_grid(src, tgt_width, tgt_height):
 
     return (crop_top, crop_left), (crop_top + resize_height, crop_left + resize_width)
 
-@amp.autocast(enabled=False)
+@torch.amp.autocast('cuda', enabled=False)
 @torch.compiler.disable()
 def rope_apply(x, grid_sizes, freqs):
     n, c = x.size(2), x.size(3) // 2
@@ -747,6 +747,7 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         in_dim_control_adapter=24,
         add_ref_conv=False,
         in_dim_ref_conv=16,
+        cross_attn_type=None,
     ):
         r"""
         Initialize the diffusion model backbone.
@@ -786,7 +787,7 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         super().__init__()
 
-        assert model_type in ['t2v', 'i2v']
+        assert model_type in ['t2v', 'i2v', 'ti2v']
         self.model_type = model_type
 
         self.patch_size = patch_size
@@ -816,7 +817,8 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # blocks
-        cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
+        if cross_attn_type is None:
+            cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
             WanAttentionBlock(cross_attn_type, dim, ffn_dim, num_heads,
                               window_size, qk_norm, cross_attn_norm, eps)
@@ -879,11 +881,17 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         num_steps: int,
         rel_l1_thresh: float,
         num_skip_start_steps: int = 0,
-        offload: bool = True
+        offload: bool = True,
     ):
         self.teacache = TeaCache(
             coefficients, num_steps, rel_l1_thresh=rel_l1_thresh, num_skip_start_steps=num_skip_start_steps, offload=offload
         )
+
+    def share_teacache(
+        self,
+        transformer = None,
+    ):
+        self.teacache = transformer.teacache
 
     def disable_teacache(self):
         self.teacache = None
@@ -897,6 +905,14 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             self.cfg_skip_ratio = None
             self.current_steps = 0
             self.num_inference_steps = None
+
+    def share_cfg_skip(
+        self,
+        transformer = None,
+    ):
+        self.cfg_skip_ratio = transformer.cfg_skip_ratio
+        self.current_steps = transformer.current_steps
+        self.num_inference_steps = transformer.num_inference_steps
 
     def disable_cfg_skip(self):
         self.cfg_skip_ratio = None
@@ -1021,7 +1037,7 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         ])
 
         # time embeddings
-        with amp.autocast(dtype=torch.float32):
+        with torch.amp.autocast('cuda', dtype=torch.float32):
             e = self.time_embedding(
                 sinusoidal_embedding_1d(self.freq_dim, t).float())
             e0 = self.time_projection(e).unflatten(1, (6, self.dim))
@@ -1390,23 +1406,30 @@ class Wan2_2Transformer3DModel(WanTransformer3DModel):
     # _no_split_modules = ['WanAttentionBlock']
     _supports_gradient_checkpointing = True
     
-    @register_to_config
-    def __init__(self,
-                 model_type='t2v',
-                 patch_size=(1, 2, 2),
-                 text_len=512,
-                 in_dim=16,
-                 dim=2048,
-                 ffn_dim=8192,
-                 freq_dim=256,
-                 text_dim=4096,
-                 out_dim=16,
-                 num_heads=16,
-                 num_layers=32,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 cross_attn_norm=True,
-                 eps=1e-6):
+    def __init__(
+        self,
+        model_type='t2v',
+        patch_size=(1, 2, 2),
+        text_len=512,
+        in_dim=16,
+        dim=2048,
+        ffn_dim=8192,
+        freq_dim=256,
+        text_dim=4096,
+        out_dim=16,
+        num_heads=16,
+        num_layers=32,
+        window_size=(-1, -1),
+        qk_norm=True,
+        cross_attn_norm=True,
+        eps=1e-6,
+        in_channels=16,
+        hidden_size=2048,
+        add_control_adapter=False,
+        in_dim_control_adapter=24,
+        add_ref_conv=False,
+        in_dim_ref_conv=16,
+    ):
         r"""
         Initialize the diffusion model backbone.
         Args:
@@ -1441,47 +1464,30 @@ class Wan2_2Transformer3DModel(WanTransformer3DModel):
             eps (`float`, *optional*, defaults to 1e-6):
                 Epsilon value for normalization layers
         """
-        super().__init__()
-        assert model_type in ['t2v', 'i2v', 'ti2v']
-        self.model_type = model_type
-        self.patch_size = patch_size
-        self.text_len = text_len
-        self.in_dim = in_dim
-        self.dim = dim
-        self.ffn_dim = ffn_dim
-        self.freq_dim = freq_dim
-        self.text_dim = text_dim
-        self.out_dim = out_dim
-        self.num_heads = num_heads
-        self.num_layers = num_layers
-        self.window_size = window_size
-        self.qk_norm = qk_norm
-        self.cross_attn_norm = cross_attn_norm
-        self.eps = eps
-        # embeddings
-        self.patch_embedding = nn.Conv3d(
-            in_dim, dim, kernel_size=patch_size, stride=patch_size)
-        self.text_embedding = nn.Sequential(
-            nn.Linear(text_dim, dim), nn.GELU(approximate='tanh'),
-            nn.Linear(dim, dim))
-        self.time_embedding = nn.Sequential(
-            nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
-        self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
-        # blocks
-        self.blocks = nn.ModuleList([
-            WanAttentionBlock("cross_attn", dim, ffn_dim, num_heads, window_size, qk_norm,
-                              cross_attn_norm, eps) for _ in range(num_layers)
-        ])
-        # head
-        self.head = Head(dim, out_dim, patch_size, eps)
-        # buffers (don't use register_buffer otherwise dtype will be changed in to())
-        assert (dim % num_heads) == 0 and (dim // num_heads) % 2 == 0
-        d = dim // num_heads
-        self.freqs = torch.cat([
-            rope_params(1024, d - 4 * (d // 6)),
-            rope_params(1024, 2 * (d // 6)),
-            rope_params(1024, 2 * (d // 6))
-        ],
-        dim=1)
-        # initialize weights
-        self.init_weights()
+        super().__init__(
+            model_type=model_type,
+            patch_size=patch_size,
+            text_len=text_len,
+            in_dim=in_dim,
+            dim=dim,
+            ffn_dim=ffn_dim,
+            freq_dim=freq_dim,
+            text_dim=text_dim,
+            out_dim=out_dim,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            window_size=window_size,
+            qk_norm=qk_norm,
+            cross_attn_norm=cross_attn_norm,
+            eps=eps,
+            in_channels=in_channels,
+            hidden_size=hidden_size,
+            add_control_adapter=add_control_adapter,
+            in_dim_control_adapter=in_dim_control_adapter,
+            add_ref_conv=add_ref_conv,
+            in_dim_ref_conv=in_dim_ref_conv,
+            cross_attn_type="cross_attn"
+        )
+        
+        if hasattr(self, "img_emb"):
+            del self.img_emb

@@ -67,12 +67,14 @@ from videox_fun.data.bucket_sampler import (ASPECT_RATIO_512,
                                             ASPECT_RATIO_RANDOM_CROP_PROB,
                                             AspectRatioBatchImageVideoSampler,
                                             RandomSampler, get_closest_ratio)
-from videox_fun.data.dataset_image_video import (ImageVideoControlDataset,
-                                                 ImageVideoDataset,
-                                                 ImageVideoSampler,
+from videox_fun.data.dataset_image_video import (ImageVideoDataset,
                                                  get_random_mask,
-                                                 process_pose_file,
+                                                 process_pose_file)
+
+from videox_fun.data.dataset_image_video_camera import (ImageVideoControlDataset,
+                                                 ImageVideoSampler,
                                                  process_pose_params)
+
 from videox_fun.models import (AutoencoderKLWan, CLIPModel, WanT5EncoderModel,
                                WanTransformer3DModel)
 from videox_fun.pipeline import WanFunControlPipeline
@@ -150,6 +152,9 @@ def log_validation(vae, text_encoder, tokenizer, clip_image_encoder, transformer
                 with torch.autocast("cuda", dtype=weight_dtype):
                     video_length = int(args.video_sample_n_frames // vae.config.temporal_compression_ratio * vae.config.temporal_compression_ratio) + 1 if args.video_sample_n_frames != 1 else 1
                     input_video, input_video_mask, ref_image, clip_image = get_video_to_video_latent(args.validation_paths[i], video_length=video_length, sample_size=[args.video_sample_size, args.video_sample_size])
+                    # control_camera_video 
+                    # ref_image, clip_image = get_image_to_video_latent(args.validation_paths[i], sample_size=[args.image_sample_size, args.image_sample_size])
+                    
                     sample = pipeline(
                         args.validation_prompts[i], 
                         num_frames = video_length,
@@ -476,6 +481,9 @@ def parse_args():
     )
     parser.add_argument(
         "--training_with_video_token_length", action="store_true", help="The training stage of the model in training.",
+    )
+    parser.add_argument(
+        "--auto_tile_batch_size", action="store_true", help="Whether to auto tile batch size.",
     )
     parser.add_argument(
         "--motion_sub_loss", action="store_true", help="Whether enable motion sub loss."
@@ -856,7 +864,7 @@ def main():
                     network_state_dict = {}
                     for key in accelerate_state_dict:
                         if "network" in key:
-                            network_state_dict[key.replace("network.", "")] = accelerate_state_dict[key]
+                            network_state_dict[key.replace("network.", "")] = accelerate_state_dict[key].to(weight_dtype)
 
                     save_file(network_state_dict, safetensor_save_path, metadata={"format": "pt"})
 
@@ -1528,7 +1536,7 @@ def main():
                     control_camera_values = batch["control_camera_values"].to(weight_dtype)
 
                 # Increase the batch size when the length of the latent sequence of the current sample is small
-                if args.training_with_video_token_length and zero_stage != 3:
+                if args.auto_tile_batch_size and args.training_with_video_token_length and zero_stage != 3:
                     if args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 16 >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]:
                         pixel_values = torch.tile(pixel_values, (4, 1, 1, 1, 1))
                         control_pixel_values = torch.tile(control_pixel_values, (4, 1, 1, 1, 1))
@@ -1555,7 +1563,7 @@ def main():
                     clip_pixel_values = batch["clip_pixel_values"]
                     clip_idx = batch["clip_idx"]
                     # Increase the batch size when the length of the latent sequence of the current sample is small
-                    if args.training_with_video_token_length and zero_stage != 3:
+                    if args.auto_tile_batch_size and args.training_with_video_token_length and zero_stage != 3:
                         if args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 16 >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]:
                             clip_pixel_values = torch.tile(clip_pixel_values, (4, 1, 1, 1))
                             ref_pixel_values = torch.tile(ref_pixel_values, (4, 1, 1, 1, 1))
@@ -1792,7 +1800,7 @@ def main():
                 )
 
                 # Predict the noise residual
-                with torch.cuda.amp.autocast(dtype=weight_dtype), torch.cuda.device(device=accelerator.device):
+                with torch.amp.autocast('cuda', dtype=weight_dtype), torch.cuda.device(device=accelerator.device):
                     noise_pred = transformer3d(
                         x=noisy_latents,
                         context=prompt_embeds,

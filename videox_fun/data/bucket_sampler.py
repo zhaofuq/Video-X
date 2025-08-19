@@ -6,6 +6,7 @@ from typing import (Generic, Iterable, Iterator, List, Optional, Sequence,
 import cv2
 import numpy as np
 import torch
+import json
 from PIL import Image
 from torch.utils.data import BatchSampler, Dataset, Sampler
 
@@ -342,6 +343,48 @@ class AspectRatioBatchImageVideoSampler(BatchSampler):
                 if len(bucket) == self.batch_size:
                     yield bucket[:]
                     del bucket[:]
+
+            elif content_type == 'frame':
+                try:
+                    video_dict = self.dataset[idx]
+                    width, height = video_dict.get("width", None), video_dict.get("height", None)
+
+                    if width is None or height is None:
+                        video_id, name = video_dict['file_path'], video_dict['text']
+                        if self.train_folder is None:
+                            video_dir = video_id
+                        else:
+                            video_dir = os.path.join(self.train_folder, video_id)
+
+                        camera_path = os.path.join(video_dir, 'transforms.json')
+                        if not os.path.exists(camera_path):
+                            raise ValueError(f"Meta data {camera_path} does not exist.")
+
+                        # 获取视频尺寸
+                        meta_data = json.load(open(camera_path))
+                        width, height = int(meta_data.get("w", 1280)), int(meta_data.get("h", 720))
+                        if 'DL3DV' in camera_path:
+                            width, height = width // 4, height // 4 # DL3DV dataset with 3840 * 2160  -> 960 * 540 resolution
+     
+                        ratio = height / width # self.dataset[idx]
+                    else:
+                        height = int(height)
+                        width = int(width)
+                        ratio = height / width # self.dataset[idx]
+                except Exception as e:
+                    print(e, self.dataset[idx], "This item is error, please check it.")
+                    continue
+                # find the closest aspect ratio
+                closest_ratio = min(self.aspect_ratios.keys(), key=lambda r: abs(float(r) - ratio))
+                if closest_ratio not in self.current_available_bucket_keys:
+                    continue
+                bucket = self.bucket['video'][closest_ratio]
+                bucket.append(idx)
+                # yield a batch of indices in the same aspect ratio group
+                if len(bucket) == self.batch_size:
+                    yield bucket[:]
+                    del bucket[:]
+
             else:
                 try:
                     video_dict = self.dataset[idx]

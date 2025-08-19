@@ -181,20 +181,53 @@ def ray_condition(K, c2w, H, W, device):
     rays_o = c2w[..., :3, 3]  # B, V, 3
     rays_o = rays_o[:, :, None].expand_as(rays_d)  # B, V, 3, HW
     # c2w @ dirctions
-    rays_dxo = torch.cross(rays_o, rays_d)
+    rays_dxo = torch.linalg.cross(rays_o, rays_d)
     plucker = torch.cat([rays_dxo, rays_d], dim=-1)
     plucker = plucker.reshape(B, c2w.shape[1], H, W, 6)  # B, V, H, W, 6
     # plucker = plucker.permute(0, 1, 4, 2, 3)
     return plucker
 
-def process_pose_file(pose_file_path, width=672, height=384, original_pose_width=1280, original_pose_height=720, device='cpu', return_poses=False):
+def process_pose_file(pose_file_path, width=672, height=384, original_pose_width=1280, original_pose_height=720, device='cpu', return_poses=False, sample_indices = None):
     """Modified from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
     """
-    with open(pose_file_path, 'r') as f:
-        poses = f.readlines()
 
-    poses = [pose.strip().split(' ') for pose in poses[1:]]
-    cam_params = [[float(x) for x in pose] for pose in poses]
+    if pose_file_path.lower().endswith('.txt'):
+        with open(pose_file_path, 'r') as f:
+            poses = f.readlines()
+
+        poses = [pose.strip().split(' ') for pose in poses[1:]]
+        cam_params = [[float(x) for x in pose] for pose in poses]
+
+    else:
+        poses = json.load(open(pose_file_path))
+        cam_params = []
+        fx, fy, cx, cy = poses['fl_x'], poses['fl_y'], poses['cx'], poses['cy']
+        if "images_4" in pose_file_path:
+            # For DL3DV dataset, use downsample ratio 4.
+            fx, fy, cx, cy = fx / 4, fy / 4, cx / 4, cy / 4
+
+        if sample_indices is not None:
+            for sample_index in sample_indices:
+                pose = poses['frames'][sample_index]
+                c2w_pose = np.array(pose['transform_matrix'])
+                w2c_pose = np.linalg.inv(c2w_pose)
+                cam_params.append([
+                    0, fx, fy, cx, cy, 0.0, 0.0,
+                    w2c_pose[0][0], w2c_pose[0][1], w2c_pose[0][2], w2c_pose[0][3],
+                    w2c_pose[1][0], w2c_pose[1][1], w2c_pose[1][2], w2c_pose[1][3],
+                    w2c_pose[2][0], w2c_pose[2][1], w2c_pose[2][2], w2c_pose[2][3],
+                ])
+        else:
+            for id, pose in enumerate(poses['frames']):
+                c2w_pose = np.array(pose['transform_matrix'])
+                w2c_pose = np.linalg.inv(c2w_pose)
+                cam_params.append([
+                    0, fx, fy, cx, cy, 0.0, 0.0,
+                    w2c_pose[0][0], w2c_pose[0][1], w2c_pose[0][2], w2c_pose[0][3],
+                    w2c_pose[1][0], w2c_pose[1][1], w2c_pose[1][2], w2c_pose[1][3],
+                    w2c_pose[2][0], w2c_pose[2][1], w2c_pose[2][2], w2c_pose[2][3],
+                ])
+
     if return_poses:
         return cam_params
     else:
@@ -229,7 +262,7 @@ def process_pose_file(pose_file_path, width=672, height=384, original_pose_width
 def process_pose_params(cam_params, width=672, height=384, original_pose_width=1280, original_pose_height=720, device='cpu'):
     """Modified from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
     """
-    cam_params = [Camera(cam_param) for cam_param in cam_params]
+    cam_params = [Camera(cam_param) for cam_param in cam_params.squeeze(0).squeeze(0)]
 
     sample_wh_ratio = width / height
     pose_wh_ratio = original_pose_width / original_pose_height  # Assuming placeholder ratios, change as needed
@@ -484,6 +517,7 @@ class ImageVideoDataset(Dataset):
             try:
                 data_info_local = self.dataset[idx % len(self.dataset)]
                 data_type_local = data_info_local.get('type', 'image')
+
                 if data_type_local != data_type:
                     raise ValueError("data_type_local != data_type")
 
@@ -531,10 +565,10 @@ class ImageVideoControlDataset(Dataset):
         # Loading annotations from files
         print(f"loading annotations from {ann_path} ...")
         if ann_path.endswith('.csv'):
-            with open(ann_path, 'r') as csvfile:
+            with open(os.path.join(data_root, ann_path), 'r') as csvfile:
                 dataset = list(csv.DictReader(csvfile))
         elif ann_path.endswith('.json'):
-            dataset = json.load(open(ann_path))
+            dataset = json.load(open(os.path.join(data_root, ann_path)))["train_data"]
     
         self.data_root = data_root
 
@@ -595,9 +629,27 @@ class ImageVideoControlDataset(Dataset):
 
         self.larger_side_of_image_and_video = max(min(self.image_sample_size), min(self.video_sample_size))
     
+    def sample_frame_indices(self, num_frames):
+        """
+        随机抽取 n_sample 帧，如果超过总帧数则允许重复。
+        返回按顺序排序的帧索引列表。
+        """
+        if num_frames <= 0:
+            raise ValueError("total_frames larger than 0")
+
+        if self.video_sample_n_frames <= num_frames:
+            indices = random.sample(range(num_frames), self.video_sample_n_frames)  # 无放回
+        else:
+            indices = random.choices(range(num_frames), k=self.video_sample_n_frames)  # 有放回
+
+        return sorted(indices)
+
     def get_batch(self, idx):
         data_info = self.dataset[idx % len(self.dataset)]
         video_id, text = data_info['file_path'], data_info['text']
+
+        if text is None or text == "":
+            text = "A realistic multi-view capture of a real-world scene, photographed from various angles using both aerial and handheld cameras, featuring smooth and dynamic camera movements, natural lighting, detailed textures, and perspective changes."
 
         if data_info.get('type', 'image')=='video':
             if self.data_root is None:
@@ -656,7 +708,7 @@ class ImageVideoControlDataset(Dataset):
                 control_video_id = os.path.join(self.data_root, control_video_id)
             
             if self.enable_camera_info:
-                if control_video_id.lower().endswith('.txt'):
+                if control_video_id.lower().endswith('.txt') or control_video_id.lower().endswith('.json'):
                     if not self.enable_bucket:
                         control_pixel_values = torch.zeros_like(pixel_values)
 
@@ -709,6 +761,81 @@ class ImageVideoControlDataset(Dataset):
 
             return pixel_values, control_pixel_values, control_camera_values, text, "video", video_dir
 
+        elif data_info.get('type', 'image')=='frame':
+            # extracted frame process
+            if self.data_root is None:
+                video_dir = video_id
+            else:
+                video_dir = os.path.join(self.data_root, video_id)
+
+            # camera and corresponding extracted frame 
+            camera_path = os.path.join(video_dir, 'transforms.json')
+            if not os.path.exists(camera_path):
+                raise ValueError(f"Meta data {camera_path} does not exist.")
+
+            meta_data = json.load(open(camera_path))
+            num_frames = len(meta_data['frames'])
+
+            sample_indices = self.sample_frame_indices(num_frames)
+
+            resized_frames = []
+            for sample_index in sample_indices:
+                frame_info = meta_data['frames'][sample_index]
+                frame_path = os.path.join(video_dir, frame_info['file_path'])
+
+                # DL3DV dataset image path replace image with image_4
+                if 'DL3DV' in frame_path:
+                    frame_path = frame_path.replace('images', 'images_4')
+
+                if not os.path.exists(frame_path):
+                    raise ValueError(f"Frame {frame_path} does not exist.")
+
+                frame = Image.open(frame_path).convert('RGB')
+
+                # This is to ensure that the frame is in the correct format for resizing.
+                frame_np = np.array(frame)
+
+                resized_frame = resize_frame(frame_np, self.larger_side_of_image_and_video)
+                resized_frames.append(resized_frame)
+
+            pixel_values = np.array(resized_frames)
+
+            if not self.enable_bucket:
+                pixel_values = torch.from_numpy(pixel_values).permute(0, 3, 1, 2).contiguous()
+                pixel_values = pixel_values / 255.
+            else:
+                pixel_values = pixel_values
+
+            if not self.enable_bucket:
+                pixel_values = self.video_transforms(pixel_values)
+
+            if self.enable_camera_info:
+                if camera_path.lower().endswith('.txt') or camera_path.lower().endswith('.json'):
+                    if not self.enable_bucket:
+                        control_pixel_values = torch.zeros_like(pixel_values)
+
+                        control_camera_values = process_pose_file(camera_path, width=self.video_sample_size[1], height=self.video_sample_size[0], sample_indices=sample_indices)
+                        control_camera_values = control_camera_values.permute(0, 3, 1, 2).contiguous()
+                        control_camera_values = self.video_transforms_camera(control_camera_values)
+                    else:
+                        control_pixel_values = np.zeros_like(pixel_values)
+
+                        control_camera_values = process_pose_file(camera_path, width=self.video_sample_size[1], height=self.video_sample_size[0], return_poses=True, sample_indices=sample_indices)
+                        control_camera_values = torch.from_numpy(np.array(control_camera_values)).unsqueeze(0).unsqueeze(0)
+                        control_camera_values = np.array([control_camera_values[index] for index in range(len(control_camera_values))])
+                else:
+                    if not self.enable_bucket:
+                        control_pixel_values = torch.zeros_like(pixel_values)
+                        control_camera_values = None
+                    else:
+                        control_pixel_values = np.zeros_like(pixel_values)
+                        control_camera_values = None
+
+            else:
+                assert True, "Camera info is required for frame type."
+
+            return pixel_values, control_pixel_values, control_camera_values, text, "frame", video_dir
+
         else:
             image_path, text = data_info['file_path'], data_info['text']
             if self.data_root is not None:
@@ -741,12 +868,14 @@ class ImageVideoControlDataset(Dataset):
 
     def __getitem__(self, idx):
         data_info = self.dataset[idx % len(self.dataset)]
-        data_type = data_info.get('type', 'image')
+        data_type = data_info.get('type', 'frame')
+
+       
         while True:
             sample = {}
             try:
                 data_info_local = self.dataset[idx % len(self.dataset)]
-                data_type_local = data_info_local.get('type', 'image')
+                data_type_local = data_info_local.get('type', 'frame')
                 if data_type_local != data_type:
                     raise ValueError("data_type_local != data_type")
 
@@ -808,3 +937,30 @@ class ImageVideoSafetensorsDataset(Dataset):
             path = os.path.join(self.data_root, self.dataset[idx]["file_path"])
         state_dict = load_file(path)
         return state_dict
+
+
+if __name__ == "__main__":
+    # Example usage
+    train_dataset = ImageVideoControlDataset(
+        "/root/code/datasets/annotations.json", 
+        "/root/code/datasets/",
+        video_sample_size=256, video_sample_stride=2, video_sample_n_frames=81, 
+        video_repeat=1, 
+        image_sample_size=1024,
+        enable_bucket=True, 
+        enable_camera_info=True
+    )
+    
+    sample = train_dataset[1024]
+    print(sample['pixel_values'].shape, sample['text'], sample['data_type'])
+    print(sample['pixel_values'].min(), sample['pixel_values'].max())
+    if 'control_pixel_values' in sample:
+        print(sample['control_pixel_values'].shape)
+    
+
+
+
+
+
+
+

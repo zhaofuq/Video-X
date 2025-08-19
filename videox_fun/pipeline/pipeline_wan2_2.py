@@ -113,7 +113,7 @@ class Wan2_2Pipeline(DiffusionPipeline):
     """
 
     _optional_components = ["transformer_2"]
-    model_cpu_offload_seq = "text_encoder->transformer->transformer_2->vae"
+    model_cpu_offload_seq = "text_encoder->transformer_2->transformer->vae"
 
     _callback_tensor_inputs = [
         "latents",
@@ -539,7 +539,7 @@ class Wan2_2Pipeline(DiffusionPipeline):
                     local_transformer = self.transformer
 
                 # predict noise model_output
-                with torch.cuda.amp.autocast(dtype=weight_dtype), torch.cuda.device(device=device):
+                with torch.amp.autocast('cuda', dtype=weight_dtype), torch.cuda.device(device=device):
                     noise_pred = local_transformer(
                         x=latent_model_input,
                         context=in_prompt_embeds,

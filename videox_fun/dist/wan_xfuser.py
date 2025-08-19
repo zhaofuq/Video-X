@@ -19,7 +19,7 @@ def pad_freqs(original_tensor, target_len):
     padded_tensor = torch.cat([original_tensor, padding_tensor], dim=0)
     return padded_tensor
 
-@amp.autocast(enabled=False)
+@torch.amp.autocast('cuda', enabled=False)
 @torch.compiler.disable()
 def rope_apply(x, grid_sizes, freqs):
     """
