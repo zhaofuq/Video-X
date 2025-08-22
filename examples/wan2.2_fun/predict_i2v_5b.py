@@ -13,7 +13,7 @@ for project_root in project_roots:
     sys.path.insert(0, project_root) if project_root not in sys.path else None
 
 from videox_fun.dist import set_multi_gpus_devices, shard_model
-from videox_fun.models import (AutoencoderKLWan, AutoencoderKLWan3_8, AutoTokenizer, CLIPModel,
+from videox_fun.models import (AutoencoderKLWan, AutoTokenizer, CLIPModel, AutoencoderKLWan3_8,
                               WanT5EncoderModel, Wan2_2Transformer3DModel)
 from videox_fun.models.cache_utils import get_teacache_coefficients
 from videox_fun.pipeline import Wan2_2FunInpaintPipeline
@@ -78,9 +78,9 @@ enable_riflex       = False
 riflex_k            = 6
 
 # Config and model path
-config_path         = "config/wan2.2/wan_civitai_i2v.yaml"
+config_path         = "config/wan2.2/wan_civitai_5b.yaml"
 # model path
-model_name          = "models/Diffusion_Transformer/Wan2.2-Fun-A14B-InP"
+model_name          = "models/Diffusion_Transformer/Wan2.2-Fun-5B-InP/"
 
 # Choose the sampler in "Flow", "Flow_Unipc", "Flow_DPM++"
 sampler_name        = "Flow"
@@ -90,18 +90,20 @@ shift               = 5
 
 # Load pretrained model if need
 # The transformer_path is used for low noise model, the transformer_high_path is used for high noise model.
+# Since Wan2.2-5b consists of only one model, only transformer_path is used.
 transformer_path        = None
 transformer_high_path   = None
 vae_path                = None
 # Load lora model if need
 # The lora_path is used for low noise model, the lora_high_path is used for high noise model.
+# Since Wan2.2-5b consists of only one model, only lora_path is used.
 lora_path               = None
-lora_high_path          = None 
+lora_high_path          = None
 
 # Other params
-sample_size         = [480, 832]
-video_length        = 81
-fps                 = 16
+sample_size         = [704, 1280]
+video_length        = 121
+fps                 = 24
 
 # Use torch.float16 if GPU does not support torch.bfloat16
 # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
@@ -112,7 +114,7 @@ validation_image_end    = None
 
 # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
 # 在neg prompt中添加"安静，固定"等词语可以增加动态性。
-prompt              = "一只棕色的狗摇着头，坐在舒适房间里的浅色沙发上。在狗的后面，架子上有一幅镶框的画，周围是粉红色的花朵。房间里柔和温暖的灯光营造出舒适的氛围。"
+prompt              = "一只棕色的狗舔了一下它的舌头，坐在舒适房间里的浅色沙发上。在狗的后面，架子上有一幅镶框的画，周围是粉红色的花朵。房间里柔和温暖的灯光营造出舒适的氛围。"
 negative_prompt     = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
 guidance_scale      = 6.0
 seed                = 43
