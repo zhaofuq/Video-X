@@ -1875,7 +1875,7 @@ def main():
                                     removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
                                     shutil.rmtree(removing_checkpoint)
                         if not args.save_state:
-                            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}.safetensors")
+                            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}/lora_diffusion_pytorch_model.safetensors")
                             save_model(safetensor_save_path, accelerator.unwrap_model(network))
                             logger.info(f"Saved safetensor to {safetensor_save_path}")
                         else:

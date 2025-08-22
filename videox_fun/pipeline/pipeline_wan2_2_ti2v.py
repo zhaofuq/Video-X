@@ -148,7 +148,7 @@ class WanPipelineOutput(BaseOutput):
     videos: torch.Tensor
 
 
-class Wan2_2I2VPipeline(DiffusionPipeline):
+class Wan2_2TI2VPipeline(DiffusionPipeline):
     r"""
     Pipeline for text-to-video generation using Wan.
 
@@ -180,10 +180,10 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
             tokenizer=tokenizer, text_encoder=text_encoder, vae=vae, transformer=transformer, 
             transformer_2=transformer_2, scheduler=scheduler
         )
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae.spacial_compression_ratio)
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae.spacial_compression_ratio)
+        self.video_processor = VideoProcessor(vae_scale_factor=self.vae.spatial_compression_ratio)
+        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae.spatial_compression_ratio)
         self.mask_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae.spacial_compression_ratio, do_normalize=False, do_binarize=True, do_convert_grayscale=True
+            vae_scale_factor=self.vae.spatial_compression_ratio, do_normalize=False, do_binarize=True, do_convert_grayscale=True
         )
 
     def _get_t5_prompt_embeds(
@@ -324,8 +324,8 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
             batch_size,
             num_channels_latents,
             (num_frames - 1) // self.vae.temporal_compression_ratio + 1,
-            height // self.vae.spacial_compression_ratio,
-            width // self.vae.spacial_compression_ratio,
+            height // self.vae.spatial_compression_ratio,
+            width // self.vae.spatial_compression_ratio,
         )
 
         if latents is None:
@@ -337,7 +337,6 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
         if hasattr(self.scheduler, "init_noise_sigma"):
             latents = latents * self.scheduler.init_noise_sigma
         return latents
-
 
     def prepare_mask_latents(
         self, mask, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance, noise_aug_strength
@@ -602,41 +601,39 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
             pbar.update(1)
 
         # Prepare mask latent variables
-        if init_video is not None:
-            if (mask_video == 255).all():
-                mask_latents = torch.tile(
-                    torch.zeros_like(latents)[:, :1].to(device, weight_dtype), [1, 4, 1, 1, 1]
-                )
-                masked_video_latents = torch.zeros_like(latents).to(device, weight_dtype)
-            else:
-                bs, _, video_length, height, width = video.size()
-                mask_condition = self.mask_processor.preprocess(rearrange(mask_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
-                mask_condition = mask_condition.to(dtype=torch.float32)
-                mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=video_length)
+        if init_video is not None and not (mask_video == 255).all():
+            bs, _, video_length, height, width = video.size()
+            mask_condition = self.mask_processor.preprocess(rearrange(mask_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
+            mask_condition = mask_condition.to(dtype=torch.float32)
+            mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=video_length)
 
-                masked_video = init_video * (torch.tile(mask_condition, [1, 3, 1, 1, 1]) < 0.5)
-                _, masked_video_latents = self.prepare_mask_latents(
-                    None,
-                    masked_video,
-                    batch_size,
-                    height,
-                    width,
-                    weight_dtype,
-                    device,
-                    generator,
-                    do_classifier_free_guidance,
-                    noise_aug_strength=None,
-                )
-                
-                mask_condition = torch.concat(
-                    [
-                        torch.repeat_interleave(mask_condition[:, :, 0:1], repeats=4, dim=2), 
-                        mask_condition[:, :, 1:]
-                    ], dim=2
-                )
-                mask_condition = mask_condition.view(bs, mask_condition.shape[2] // 4, 4, height, width)
-                mask_condition = mask_condition.transpose(1, 2)
-                mask_latents = resize_mask(1 - mask_condition, masked_video_latents, True).to(device, weight_dtype) 
+            masked_video = init_video * (torch.tile(mask_condition, [1, 3, 1, 1, 1]) < 0.5)
+            _, masked_video_latents = self.prepare_mask_latents(
+                None,
+                masked_video,
+                batch_size,
+                height,
+                width,
+                weight_dtype,
+                device,
+                generator,
+                do_classifier_free_guidance,
+                noise_aug_strength=None,
+            )
+            
+            mask_condition = torch.concat(
+                [
+                    torch.repeat_interleave(mask_condition[:, :, 0:1], repeats=4, dim=2), 
+                    mask_condition[:, :, 1:]
+                ], dim=2
+            )
+            mask_condition = mask_condition.view(bs, mask_condition.shape[2] // 4, 4, height, width)
+            mask_condition = mask_condition.transpose(1, 2)
+
+            mask = F.interpolate(mask_condition[:, :1], size=latents.size()[-3:], mode='trilinear', align_corners=True).to(device, weight_dtype)
+            latents = (1 - mask) * masked_video_latents + mask * latents
+        else:
+            init_video = None
 
         if comfyui_progressbar:
             pbar.update(1)
@@ -644,7 +641,7 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
-        target_shape = (self.vae.latent_channels, (num_frames - 1) // self.vae.temporal_compression_ratio + 1, width // self.vae.spacial_compression_ratio, height // self.vae.spacial_compression_ratio)
+        target_shape = (self.vae.latent_channels, (num_frames - 1) // self.vae.temporal_compression_ratio + 1, width // self.vae.spatial_compression_ratio, height // self.vae.spatial_compression_ratio)
         seq_len = math.ceil((target_shape[2] * target_shape[3]) / (self.transformer.config.patch_size[1] * self.transformer.config.patch_size[2]) * target_shape[1]) 
         # 7. Denoising loop
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
@@ -660,16 +657,17 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
                 if hasattr(self.scheduler, "scale_model_input"):
                     latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                if init_video is not None:
-                    mask_input = torch.cat([mask_latents] * 2) if do_classifier_free_guidance else mask_latents
-                    masked_video_latents_input = (
-                        torch.cat([masked_video_latents] * 2) if do_classifier_free_guidance else masked_video_latents
-                    )
-                    y = torch.cat([mask_input, masked_video_latents_input], dim=1).to(device, weight_dtype) 
-
-
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-                timestep = t.expand(latent_model_input.shape[0])
+                if init_video is not None:
+                    temp_ts = ((mask[0][0][:, ::2, ::2]) * t).flatten()
+                    temp_ts = torch.cat([
+                        temp_ts,
+                        temp_ts.new_ones(seq_len - temp_ts.size(0)) * t
+                    ])
+                    temp_ts = temp_ts.unsqueeze(0)
+                    timestep = temp_ts.expand(latent_model_input.shape[0], temp_ts.size(1))
+                else:
+                    timestep = t.expand(latent_model_input.shape[0])
                 
                 if self.transformer_2 is not None:
                     if t >= boundary * self.scheduler.config.num_train_timesteps:
@@ -680,13 +678,12 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
                     local_transformer = self.transformer
 
                 # predict noise model_output
-                with torch.amp.autocast('cuda', dtype=weight_dtype), torch.cuda.device(device=device):
+                with torch.cuda.amp.autocast(dtype=weight_dtype), torch.cuda.device(device=device):
                     noise_pred = local_transformer(
                         x=latent_model_input,
                         context=in_prompt_embeds,
                         t=timestep,
                         seq_len=seq_len,
-                        y=y,
                     )
 
                 # perform guidance
@@ -700,6 +697,8 @@ class Wan2_2I2VPipeline(DiffusionPipeline):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                if init_video is not None:
+                    latents = (1 - mask) * masked_video_latents + mask * latents
 
                 if callback_on_step_end is not None:
                     callback_kwargs = {}

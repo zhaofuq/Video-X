@@ -39,4 +39,4 @@ accelerate launch --mixed_precision="bf16" scripts/wan2.1_fun/train_control_lora
   --control_ref_image="random" \
   --add_full_ref_image_in_self_attention \
   --low_vram \
-  --validation_prompts "A realistic multi-view capture of a real-world scene, photographed from various angles using both aerial and handheld cameras, featuring smooth and dynamic camera movements, natural lighting, detailed textures, and perspective changes."
+  --resume_from_checkpoint "latest"

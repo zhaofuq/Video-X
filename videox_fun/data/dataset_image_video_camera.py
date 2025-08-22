@@ -126,6 +126,24 @@ class Camera(object):
         self.w2c_mat = w2c_mat_4x4
         self.c2w_mat = np.linalg.inv(w2c_mat_4x4)
 
+def normalize_cam_params(cam_params):
+    # 提取所有相机中心 (translation 部分 t0, t1, t2 在列 11, 15, 19)
+    translations = np.array([[p[10], p[14], p[18]] for p in cam_params])
+
+    # 计算平移向量的最大范围
+    max_range = np.max(np.linalg.norm(translations, axis=1))
+
+    # 统一缩放到和官方相同的尺度，例如最大半径=1.0
+    scale = 1.0 / max_range
+
+    # 应用缩放
+    for p in cam_params:
+        p[10] *= scale
+        p[14] *= scale
+        p[18] *= scale
+
+    return cam_params, scale
+
 def custom_meshgrid(*args):
     """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
     """
@@ -202,31 +220,46 @@ def process_pose_file(pose_file_path, width=672, height=384, original_pose_width
         poses = json.load(open(pose_file_path))
         cam_params = []
         fx, fy, cx, cy = poses['fl_x'], poses['fl_y'], poses['cx'], poses['cy']
+        w, h = poses['w'], poses['h']
         if "images_4" in pose_file_path:
             # For DL3DV dataset, use downsample ratio 4.
             fx, fy, cx, cy = fx / 4, fy / 4, cx / 4, cy / 4
 
         if sample_indices is not None:
+            start_frame_index = sample_indices[0]
+            # get the first frame's c2w matrix
+            c2w_ref = np.array(poses['frames'][start_frame_index]['transform_matrix'])
+            # use the inverse of c2w_ref to align the camera parameters
+            align_mat = np.linalg.inv(c2w_ref)
             for sample_index in sample_indices:
                 pose = poses['frames'][sample_index]
                 c2w_pose = np.array(pose['transform_matrix'])
-                w2c_pose = np.linalg.inv(c2w_pose)
+                c2w_aligned = align_mat @ c2w_pose
+                w2c_pose = np.linalg.inv(c2w_aligned)
                 cam_params.append([
-                    0, fx, fy, cx, cy, 0.0, 0.0,
+                    0, fx / w, fy / h, cx / w, cy / h, 0.0,  0.0,
                     w2c_pose[0][0], w2c_pose[0][1], w2c_pose[0][2], w2c_pose[0][3],
                     w2c_pose[1][0], w2c_pose[1][1], w2c_pose[1][2], w2c_pose[1][3],
                     w2c_pose[2][0], w2c_pose[2][1], w2c_pose[2][2], w2c_pose[2][3],
                 ])
         else:
+            # get the first frame's c2w matrix
+            c2w_ref = np.array(poses['frames'][0]['transform_matrix'])
+            # use the inverse of c2w_ref to align the camera parameters
+            align_mat = np.linalg.inv(c2w_ref)
             for id, pose in enumerate(poses['frames']):
                 c2w_pose = np.array(pose['transform_matrix'])
-                w2c_pose = np.linalg.inv(c2w_pose)
+                c2w_aligned = align_mat @ c2w_pose
+                w2c_pose = np.linalg.inv(c2w_aligned)
                 cam_params.append([
-                    0, fx, fy, cx, cy, 0.0, 0.0,
+                    0, fx / w, fy / h, cx / w, cy / h, 0.0,  0.0,
                     w2c_pose[0][0], w2c_pose[0][1], w2c_pose[0][2], w2c_pose[0][3],
                     w2c_pose[1][0], w2c_pose[1][1], w2c_pose[1][2], w2c_pose[1][3],
                     w2c_pose[2][0], w2c_pose[2][1], w2c_pose[2][2], w2c_pose[2][3],
                 ])
+
+            # consider the different world scale of camera parameters, we need to normalize them
+            cam_params, _ = normalize_cam_params(cam_params)
 
     if return_poses:
         return cam_params
@@ -638,18 +671,16 @@ class ImageVideoControlDataset(Dataset):
             raise ValueError("total_frames larger than 0")
 
         if self.video_sample_n_frames <= num_frames:
-            indices = random.sample(range(num_frames), self.video_sample_n_frames)  # 无放回
+            start = random.randint(0, num_frames - self.video_sample_n_frames)
+            indices = list(range(start, start + self.video_sample_n_frames))
         else:
-            indices = random.choices(range(num_frames), k=self.video_sample_n_frames)  # 有放回
+            indices = random.choices(range(num_frames), k=self.video_sample_n_frames)
 
         return sorted(indices)
 
     def get_batch(self, idx):
         data_info = self.dataset[idx % len(self.dataset)]
         video_id, text = data_info['file_path'], data_info['text']
-
-        if text is None or text == "":
-            text = "A realistic multi-view capture of a real-world scene, photographed from various angles using both aerial and handheld cameras, featuring smooth and dynamic camera movements, natural lighting, detailed textures, and perspective changes."
 
         if data_info.get('type', 'image')=='video':
             if self.data_root is None:
@@ -768,6 +799,19 @@ class ImageVideoControlDataset(Dataset):
             else:
                 video_dir = os.path.join(self.data_root, video_id)
 
+            if text is None or text == "":
+                if "DL3DV" in video_dir:
+                    text = "A video recorded with a handheld camera, showing both indoor and outdoor real-world scenes with natural camera motion."
+                elif "RealEstate" in video_dir:
+                    text = "A video of an indoor room tour, captured with smooth camera motion through real houses and apartments."
+                elif "ACID" in video_dir:
+                    text = "An aerial video captured by a drone, showing diverse outdoor landscapes and natural environments from different camera viewpoints."
+                elif "ACID_LARGE" in video_dir:
+                    text = "A large-scale aerial video dataset captured by drones, showing wide outdoor natural scenes and landscapes with varying flight paths."
+                else:
+                    # text = "A realistic multi-view capture of a real-world scene, photographed from various angles using handheld cameras, featuring smooth and dynamic camera movements, natural lighting, detailed textures, and perspective changes."
+                    text = "A video of real-world scenes with camera motion, including indoor environments, outdoor landscapes, and diverse viewpoints recorded for training generative models with camera parameter control."
+            
             # camera and corresponding extracted frame 
             camera_path = os.path.join(video_dir, 'transforms.json')
             if not os.path.exists(camera_path):

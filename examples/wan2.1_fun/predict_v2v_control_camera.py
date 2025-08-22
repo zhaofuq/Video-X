@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import random
 
 import numpy as np
 import torch
@@ -16,7 +18,7 @@ for project_root in project_roots:
 from videox_fun.dist import set_multi_gpus_devices, shard_model
 from videox_fun.models import (AutoencoderKLWan, AutoTokenizer, CLIPModel,
                                WanT5EncoderModel, WanTransformer3DModel)
-from videox_fun.data.dataset_image_video import process_pose_file
+from videox_fun.data.dataset_image_video_camera import process_pose_file
 from videox_fun.models.cache_utils import get_teacache_coefficients
 from videox_fun.pipeline import WanFunControlPipeline, WanPipeline
 from videox_fun.utils.fp8_optimization import (convert_model_weight_to_float8,
@@ -84,7 +86,7 @@ riflex_k            = 6
 # Config and model path
 config_path         = "config/wan2.1/wan_civitai.yaml"
 # model path
-model_name          = "models/Wan2.1-Fun-V1.1-14B-Control-Camera"
+model_name          = "../ComfyUI/models/Fun_Models/Wan2.1-Fun-V1.1-1.3B-Control-Camera"
 
 # Choose the sampler in "Flow", "Flow_Unipc", "Flow_DPM++"
 sampler_name        = "Flow"
@@ -97,7 +99,7 @@ shift               = 3
 # Load pretrained model if need
 transformer_path    = None
 vae_path            = None
-lora_path           = None
+lora_path           = "./output_dir/checkpoint-3000.safetensors"
 
 # Other params
 sample_size         = [480, 832]
@@ -108,8 +110,8 @@ fps                 = 16
 # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
 weight_dtype            = torch.bfloat16
 control_video           = None
-control_camera_txt      = "asset/Pan_Left.txt"
-start_image             = "asset/8.jpg"
+control_camera_txt      = "asset/transform_1.json"
+start_image             = "asset/8.png"
 ref_image               = None
 
 # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
@@ -282,9 +284,22 @@ with torch.no_grad():
         start_image = get_image_latent(start_image, sample_size=sample_size)
 
     if control_camera_txt is not None:
-        input_video, input_video_mask = None, None
-        control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0])
-        control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
+        if control_camera_txt.endswith(".txt"):
+            input_video, input_video_mask = None, None
+            control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0])
+            control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
+        else:
+            camera_data = json.load(open(control_camera_txt))
+            num_frames = len(camera_data['frames'])
+
+            if video_length <= num_frames:
+                indices = random.sample(range(num_frames), video_length)
+            else:
+                indices = random.choices(range(num_frames), k=video_length)
+
+            input_video, input_video_mask = None, None
+            control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0], sample_indices=indices)
+            control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
     else:
         input_video, input_video_mask, _, _ = get_video_to_video_latent(control_video, video_length=video_length, sample_size=sample_size, fps=fps, ref_image=None)
         control_camera_video = None
