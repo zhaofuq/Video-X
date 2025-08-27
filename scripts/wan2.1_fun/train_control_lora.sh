@@ -4,6 +4,7 @@ export DATASET_META_NAME="/root/code/datasets/annotations.json"
 # NCCL_IB_DISABLE=1 and NCCL_P2P_DISABLE=1 are used in multi nodes without RDMA. 
 # export NCCL_IB_DISABLE=1
 # export NCCL_P2P_DISABLE=1
+# --config_file="config/zero_stage3_config.json" 
 NCCL_DEBUG=INFO
 
 accelerate launch --mixed_precision="bf16" scripts/wan2.1_fun/train_control_lora.py \
@@ -39,4 +40,4 @@ accelerate launch --mixed_precision="bf16" scripts/wan2.1_fun/train_control_lora
   --control_ref_image="random" \
   --add_full_ref_image_in_self_attention \
   --low_vram \
-  --resume_from_checkpoint "latest"
+  --resume_from_checkpoint "latest" 

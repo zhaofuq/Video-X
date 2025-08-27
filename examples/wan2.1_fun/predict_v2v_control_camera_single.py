@@ -99,7 +99,7 @@ shift               = 3
 # Load pretrained model if need
 transformer_path    = None
 vae_path            = None
-lora_path           = "./output_dir/checkpoint-2000.safetensors"
+lora_path           = "./output_dir/A100/checkpoint-11000/lora_diffusion_pytorch_model.safetensors" 
 # Other params
 sample_size         = [480, 832]
 video_length        = 81
@@ -110,11 +110,14 @@ fps                 = 16
 weight_dtype            = torch.bfloat16
 control_video           = None
 control_camera_txt      = "asset/transform_1.json"
-start_image             = "asset/9.png"
+is_c2w                 = True
+start_image             = "asset/liber.jpg"
 ref_image               = None
 
 # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
 # 在neg prompt中添加"安静，固定"等词语可以增加动态性。
+# prompt                  = "A video of an indoor room tour, captured with smooth camera motion through real houses and apartments."
+# prompt                  = "A large-scale aerial video dataset captured by drones, showing wide outdoor natural scenes and landscapes with varying flight paths." 
 prompt                  = "A video recorded with a handheld camera, showing both indoor and outdoor real-world scenes with natural camera motion."
 negative_prompt         = "bad detailed"
 
@@ -287,7 +290,7 @@ with torch.no_grad():
         else:
             camera_data = json.load(open(control_camera_txt))
             num_frames = len(camera_data['frames'])
-
+            
             if video_length <= num_frames:
                 indices = [i for i in range(video_length)]
             else:
@@ -296,7 +299,7 @@ with torch.no_grad():
 
             
             input_video, input_video_mask = None, None
-            control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0], sample_indices=indices)
+            control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0], sample_indices=indices, is_c2w=is_c2w)
             control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
     else:
         input_video, input_video_mask, _, _ = get_video_to_video_latent(control_video, video_length=video_length, sample_size=sample_size, fps=fps, ref_image=None)

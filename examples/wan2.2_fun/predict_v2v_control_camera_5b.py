@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import random
 
 import numpy as np
 import torch
@@ -16,7 +18,7 @@ for project_root in project_roots:
 from videox_fun.dist import set_multi_gpus_devices, shard_model
 from videox_fun.models import (AutoencoderKLWan, AutoencoderKLWan3_8, AutoTokenizer, CLIPModel,
                                WanT5EncoderModel, Wan2_2Transformer3DModel)
-from videox_fun.data.dataset_image_video import process_pose_file
+from videox_fun.data.dataset_image_video_camera import process_pose_file
 from videox_fun.models.cache_utils import get_teacache_coefficients
 from videox_fun.pipeline import Wan2_2FunControlPipeline, WanPipeline
 from videox_fun.utils.fp8_optimization import (convert_model_weight_to_float8,
@@ -84,7 +86,7 @@ riflex_k            = 6
 # Config and model path
 config_path         = "config/wan2.2/wan_civitai_5b.yaml"
 # model path
-model_name          = "models/Diffusion_Transformer/Wan2.2-Fun-5B-Control-Camera/"
+model_name          = "../ComfyUI/models/Fun_Models/Wan2.2-Fun-5B-Control-Camera"
 
 # Choose the sampler in "Flow", "Flow_Unipc", "Flow_DPM++"
 sampler_name        = "Flow"
@@ -113,15 +115,15 @@ fps                 = 24
 # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
 weight_dtype            = torch.bfloat16
 control_video           = None
-control_camera_txt      = "asset/Zoom_In.txt"
-start_image             = "asset/7.png"
+control_camera_txt      = "asset/transform_1.json" # "asset/Zoom_In.txt"
+start_image             = "asset/9.png"
 end_image               = None
 ref_image               = None
 
 # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
 # 在neg prompt中添加"安静，固定"等词语可以增加动态性。
-prompt                  = "一个小女孩正在户外玩耍。她穿着一件蓝色的短袖上衣和粉色的短裤，头发扎成一个可爱的辫子。她的脚上没有穿鞋，显得非常自然和随意。她正用一把红色的小铲子在泥土里挖土，似乎在进行某种有趣的活动，可能是种花或是挖掘宝藏。地上有一根长长的水管，可能是用来浇水的。背景是一片草地和一些绿色植物，阳光明媚，整个场景充满了童趣和生机。小女孩专注的表情和认真的动作让人感受到她的快乐和好奇心。"
-negative_prompt         = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+prompt                  = "A video recorded with a handheld camera, showing both indoor and outdoor real-world scenes with natural camera motion."
+negative_prompt         = "bad detailed"
 
 # Using longer neg prompt such as "Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art." can increase stability
 # Adding words such as "quiet, solid" to the neg prompt can increase dynamism.
@@ -324,9 +326,24 @@ with torch.no_grad():
         ref_image = get_image_latent(ref_image, sample_size=sample_size)
     
     if control_camera_txt is not None:
-        input_video, input_video_mask = None, None
-        control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0])
-        control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
+        if control_camera_txt.endswith(".txt"):
+            input_video, input_video_mask = None, None
+            control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0])
+            control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
+        else:
+            camera_data = json.load(open(control_camera_txt))
+            num_frames = len(camera_data['frames'])
+
+            if video_length <= num_frames:
+                indices = [i for i in range(video_length)]
+            else:
+                indices = random.sample(range(num_frames), video_length)
+                indices = sorted(indices)
+
+            
+            input_video, input_video_mask = None, None
+            control_camera_video = process_pose_file(control_camera_txt, sample_size[1], sample_size[0], sample_indices=indices)
+            control_camera_video = control_camera_video[:video_length].permute([3, 0, 1, 2]).unsqueeze(0)
     else:
         input_video, input_video_mask, _, _ = get_video_to_video_latent(control_video, video_length=video_length, sample_size=sample_size, fps=fps, ref_image=None)
         control_camera_video = None

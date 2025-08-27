@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from random import shuffle
 from threading import Thread
 
+from concurrent.futures import ThreadPoolExecutor
+
 import albumentations
 import cv2
 import numpy as np
@@ -205,7 +207,7 @@ def ray_condition(K, c2w, H, W, device):
     # plucker = plucker.permute(0, 1, 4, 2, 3)
     return plucker
 
-def process_pose_file(pose_file_path, width=672, height=384, original_pose_width=1280, original_pose_height=720, device='cpu', return_poses=False, sample_indices = None):
+def process_pose_file(pose_file_path, width=672, height=384, original_pose_width=1280, original_pose_height=720, device='cpu', return_poses=False, sample_indices = None, is_c2w=False):
     """Modified from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
     """
 
@@ -235,7 +237,11 @@ def process_pose_file(pose_file_path, width=672, height=384, original_pose_width
                 pose = poses['frames'][sample_index]
                 c2w_pose = np.array(pose['transform_matrix'])
                 c2w_aligned = align_mat @ c2w_pose
-                w2c_pose = np.linalg.inv(c2w_aligned)
+                if is_c2w:
+                    w2c_pose = np.linalg.inv(c2w_aligned)
+                else:
+                    w2c_pose = c2w_aligned
+
                 cam_params.append([
                     0, fx / w, fy / h, cx / w, cy / h, 0.0,  0.0,
                     w2c_pose[0][0], w2c_pose[0][1], w2c_pose[0][2], w2c_pose[0][3],
@@ -250,7 +256,11 @@ def process_pose_file(pose_file_path, width=672, height=384, original_pose_width
             for id, pose in enumerate(poses['frames']):
                 c2w_pose = np.array(pose['transform_matrix'])
                 c2w_aligned = align_mat @ c2w_pose
-                w2c_pose = np.linalg.inv(c2w_aligned)
+                if is_c2w:
+                    w2c_pose = np.linalg.inv(c2w_aligned)
+                else:
+                    w2c_pose = c2w_aligned
+
                 cam_params.append([
                     0, fx / w, fy / h, cx / w, cy / h, 0.0,  0.0,
                     w2c_pose[0][0], w2c_pose[0][1], w2c_pose[0][2], w2c_pose[0][3],
@@ -353,11 +363,11 @@ class ImageVideoSampler(BatchSampler):
         self.drop_last = drop_last
 
         # buckets for each aspect ratio
-        self.bucket = {'image':[], 'video':[]}
+        self.bucket = {'image':[], 'video':[], 'frame':[]}
 
     def __iter__(self):
         for idx in self.sampler:
-            content_type = self.dataset.dataset[idx].get('type', 'image')
+            content_type = self.dataset.dataset[idx].get('type', 'frame')
             self.bucket[content_type].append(idx)
 
             # yield a batch of indices in the same aspect ratio group
@@ -367,6 +377,10 @@ class ImageVideoSampler(BatchSampler):
                 del bucket[:]
             elif len(self.bucket['image']) == self.batch_size:
                 bucket = self.bucket['image']
+                yield bucket[:]
+                del bucket[:]
+            elif len(self.bucket['frame']) == self.batch_size:
+                bucket = self.bucket['frame']
                 yield bucket[:]
                 del bucket[:]
 
@@ -398,6 +412,25 @@ def resize_frame(frame, target_short_side):
     
     resized_frame = cv2.resize(frame, (new_w, new_h))
     return resized_frame
+
+def load_and_resize_frame(frame_path, target_short_side):
+    frame = cv2.imread(frame_path)  # BGR
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    h, w, _ = frame.shape
+    if h < w:
+        if target_short_side > h:
+            return frame
+        new_h = target_short_side
+        new_w = int(target_short_side * w / h)
+    else:
+        if target_short_side > w:
+            return frame
+        new_w = target_short_side
+        new_h = int(target_short_side * h / w)
+    
+    resized_frame = cv2.resize(frame, (new_w, new_h))
+    return resized_frame
+
 
 class ImageVideoDataset(Dataset):
     def __init__(
@@ -802,16 +835,21 @@ class ImageVideoControlDataset(Dataset):
             if text is None or text == "":
                 if "DL3DV" in video_dir:
                     text = "A video recorded with a handheld camera, showing both indoor and outdoor real-world scenes with natural camera motion."
+                    is_c2w = True
                 elif "RealEstate" in video_dir:
                     text = "A video of an indoor room tour, captured with smooth camera motion through real houses and apartments."
+                    is_c2w = True
                 elif "ACID" in video_dir:
                     text = "An aerial video captured by a drone, showing diverse outdoor landscapes and natural environments from different camera viewpoints."
+                    is_c2w = True
                 elif "ACID_LARGE" in video_dir:
                     text = "A large-scale aerial video dataset captured by drones, showing wide outdoor natural scenes and landscapes with varying flight paths."
+                    is_c2w = True
                 else:
-                    # text = "A realistic multi-view capture of a real-world scene, photographed from various angles using handheld cameras, featuring smooth and dynamic camera movements, natural lighting, detailed textures, and perspective changes."
                     text = "A video of real-world scenes with camera motion, including indoor environments, outdoor landscapes, and diverse viewpoints recorded for training generative models with camera parameter control."
-            
+                    is_c2w = True
+
+
             # camera and corresponding extracted frame 
             camera_path = os.path.join(video_dir, 'transforms.json')
             if not os.path.exists(camera_path):
@@ -822,7 +860,7 @@ class ImageVideoControlDataset(Dataset):
 
             sample_indices = self.sample_frame_indices(num_frames)
 
-            resized_frames = []
+            frame_paths = []
             for sample_index in sample_indices:
                 frame_info = meta_data['frames'][sample_index]
                 frame_path = os.path.join(video_dir, frame_info['file_path'])
@@ -830,17 +868,13 @@ class ImageVideoControlDataset(Dataset):
                 # DL3DV dataset image path replace image with image_4
                 if 'DL3DV' in frame_path:
                     frame_path = frame_path.replace('images', 'images_4')
+                frame_paths.append(frame_path)
 
                 if not os.path.exists(frame_path):
                     raise ValueError(f"Frame {frame_path} does not exist.")
 
-                frame = Image.open(frame_path).convert('RGB')
-
-                # This is to ensure that the frame is in the correct format for resizing.
-                frame_np = np.array(frame)
-
-                resized_frame = resize_frame(frame_np, self.larger_side_of_image_and_video)
-                resized_frames.append(resized_frame)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                resized_frames = list(executor.map(lambda p: load_and_resize_frame(p, self.larger_side_of_image_and_video), frame_paths))
 
             pixel_values = np.array(resized_frames)
 
@@ -858,13 +892,13 @@ class ImageVideoControlDataset(Dataset):
                     if not self.enable_bucket:
                         control_pixel_values = torch.zeros_like(pixel_values)
 
-                        control_camera_values = process_pose_file(camera_path, width=self.video_sample_size[1], height=self.video_sample_size[0], sample_indices=sample_indices)
+                        control_camera_values = process_pose_file(camera_path, width=self.video_sample_size[1], height=self.video_sample_size[0], sample_indices=sample_indices, is_c2w=is_c2w)
                         control_camera_values = control_camera_values.permute(0, 3, 1, 2).contiguous()
                         control_camera_values = self.video_transforms_camera(control_camera_values)
                     else:
                         control_pixel_values = np.zeros_like(pixel_values)
 
-                        control_camera_values = process_pose_file(camera_path, width=self.video_sample_size[1], height=self.video_sample_size[0], return_poses=True, sample_indices=sample_indices)
+                        control_camera_values = process_pose_file(camera_path, width=self.video_sample_size[1], height=self.video_sample_size[0], return_poses=True, sample_indices=sample_indices, is_c2w=is_c2w)
                         control_camera_values = torch.from_numpy(np.array(control_camera_values)).unsqueeze(0).unsqueeze(0)
                         control_camera_values = np.array([control_camera_values[index] for index in range(len(control_camera_values))])
                 else:
@@ -920,6 +954,7 @@ class ImageVideoControlDataset(Dataset):
             try:
                 data_info_local = self.dataset[idx % len(self.dataset)]
                 data_type_local = data_info_local.get('type', 'frame')
+
                 if data_type_local != data_type:
                     raise ValueError("data_type_local != data_type")
 

@@ -675,6 +675,7 @@ def main():
 
     deepspeed_plugin = accelerator.state.deepspeed_plugin if hasattr(accelerator.state, "deepspeed_plugin") else None
     fsdp_plugin = accelerator.state.fsdp_plugin if hasattr(accelerator.state, "fsdp_plugin") else None
+
     if deepspeed_plugin is not None:
         zero_stage = int(deepspeed_plugin.zero_stage)
         fsdp_stage = 0
@@ -801,12 +802,25 @@ def main():
                 os.path.join(args.pretrained_model_name_or_path, config['image_encoder_kwargs'].get('image_encoder_subpath', 'image_encoder')),
             )
             clip_image_encoder = clip_image_encoder.eval()
-            
+    
     # Get Transformer
-    transformer3d = WanTransformer3DModel.from_pretrained(
-        os.path.join(args.pretrained_model_name_or_path, config['transformer_additional_kwargs'].get('transformer_subpath', 'transformer')),
-        transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs']),
-    ).to(weight_dtype)
+    # transformer3d = WanTransformer3DModel.from_pretrained(
+    #     os.path.join(args.pretrained_model_name_or_path, config['transformer_additional_kwargs'].get('transformer_subpath', 'transformer')),
+    #     transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs']),
+    # ).to(weight_dtype)
+
+    if deepspeed_plugin and deepspeed_plugin.zero_stage == 3:
+        from deepspeed import zero  # 确保安装deepspeed
+        with zero.Init():  # 启用zero-init：CPU上参数为空，直接加载到GPU分片
+            transformer3d = WanTransformer3DModel.from_pretrained(
+                os.path.join(args.pretrained_model_name_or_path, config['transformer_additional_kwargs'].get('transformer_subpath', 'transformer')),
+                transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs']),
+            ).to(weight_dtype)
+    else:
+        transformer3d = WanTransformer3DModel.from_pretrained(
+            os.path.join(args.pretrained_model_name_or_path, config['transformer_additional_kwargs'].get('transformer_subpath', 'transformer')),
+            transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs']),
+        ).to(weight_dtype)
 
     # Freeze vae and text_encoder and set transformer3d to trainable
     vae.requires_grad_(False)
@@ -1875,6 +1889,7 @@ def main():
                                     removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
                                     shutil.rmtree(removing_checkpoint)
                         if not args.save_state:
+                            os.makedirs(os.path.join(args.output_dir, f"checkpoint-{global_step}"), exist_ok=True)
                             safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}/lora_diffusion_pytorch_model.safetensors")
                             save_model(safetensor_save_path, accelerator.unwrap_model(network))
                             logger.info(f"Saved safetensor to {safetensor_save_path}")
@@ -1925,7 +1940,8 @@ def main():
     accelerator.wait_for_everyone()
     if args.use_deepspeed or args.use_fsdp or accelerator.is_main_process:
         if not args.save_state:
-            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}.safetensors")
+            os.makedirs(os.path.join(args.output_dir, f"checkpoint-{global_step}"), exist_ok=True)
+            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}/lora_diffusion_pytorch_model.safetensors")
             save_model(safetensor_save_path, accelerator.unwrap_model(network))
         else:
             accelerator_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")

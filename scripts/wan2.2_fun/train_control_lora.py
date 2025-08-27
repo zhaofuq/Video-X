@@ -67,12 +67,14 @@ from videox_fun.data.bucket_sampler import (ASPECT_RATIO_512,
                                             ASPECT_RATIO_RANDOM_CROP_PROB,
                                             AspectRatioBatchImageVideoSampler,
                                             RandomSampler, get_closest_ratio)
-from videox_fun.data.dataset_image_video import (ImageVideoControlDataset,
-                                                 ImageVideoDataset,
-                                                 ImageVideoSampler,
+from videox_fun.data.dataset_image_video import (ImageVideoDataset,
                                                  get_random_mask,
-                                                 process_pose_file,
+                                                 process_pose_file)
+
+from videox_fun.data.dataset_image_video_camera import (ImageVideoControlDataset,
+                                                 ImageVideoSampler,
                                                  process_pose_params)
+
 from videox_fun.models import (AutoencoderKLWan, CLIPModel, WanT5EncoderModel,
                                Wan2_2Transformer3DModel)
 from videox_fun.pipeline import WanFunControlPipeline
@@ -1989,7 +1991,7 @@ def main():
                                     removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
                                     shutil.rmtree(removing_checkpoint)
                         if not args.save_state:
-                            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}.safetensors")
+                            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}/lora_diffusion_pytorch_model.safetensors")
                             save_model(safetensor_save_path, accelerator.unwrap_model(network))
                             logger.info(f"Saved safetensor to {safetensor_save_path}")
                         else:
@@ -2037,7 +2039,7 @@ def main():
     accelerator.wait_for_everyone()
     if args.use_deepspeed or args.use_fsdp or accelerator.is_main_process:
         if not args.save_state:
-            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}.safetensors")
+            safetensor_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}/lora_diffusion_pytorch_model.safetensors")
             save_model(safetensor_save_path, accelerator.unwrap_model(network))
         else:
             accelerator_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")

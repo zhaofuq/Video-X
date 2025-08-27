@@ -1,4 +1,5 @@
 {
+    "distributed_type": "DEEPSPEED",
     "bf16": {
         "enabled": true
     },
